@@ -1,7 +1,8 @@
 import os
 import sys
 import datetime
-from PySide6.QtCore import Qt, Signal, QTimer
+import logging
+from PySide6.QtCore import Qt, Signal, QTimer, QObject
 from PySide6.QtGui import QIcon, QPixmap, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
@@ -10,9 +11,21 @@ from PySide6.QtWidgets import (
 )
 from src.config import config_manager
 from src.audio.recorder import AudioRecorder
+from src.engine.model_manager import model_manager
 from src.ui.styles import DARK_GLASS_STYLE
 
 LOGO_PATH = r"c:\Users\MAXIMUS\PROJECTS\PrimeDictate-Project\PrimeDictate-Logo.png"
+
+class QtLogHandler(logging.Handler, QObject):
+    log_signal = Signal(str)
+
+    def __init__(self):
+        logging.Handler.__init__(self)
+        QObject.__init__(self)
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.log_signal.emit(msg)
 
 class MainWindow(QMainWindow):
     request_toggle_dictation = Signal()
@@ -20,8 +33,8 @@ class MainWindow(QMainWindow):
     def __init__(self, app_controller=None):
         super().__init__()
         self.app_controller = app_controller
-        self.setWindowTitle("PrimeDictate - Windows Sesli Yazma Paneli")
-        self.resize(750, 580)
+        self.setWindowTitle("PrimeDictate - Windows Sesli Yazma Asistanı")
+        self.resize(800, 680)
         self.setStyleSheet(DARK_GLASS_STYLE)
 
         if os.path.exists(LOGO_PATH):
@@ -29,6 +42,8 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self.load_settings_to_ui()
+        self._setup_log_stream()
+        self._connect_model_manager_signals()
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -42,15 +57,15 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout()
         logo_img = QLabel()
         if os.path.exists(LOGO_PATH):
-            pix = QPixmap(LOGO_PATH).scaled(38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pix = QPixmap(LOGO_PATH).scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             logo_img.setPixmap(pix)
         header_layout.addWidget(logo_img)
 
         title_layout = QVBoxLayout()
         title_label = QLabel("PrimeDictate")
-        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #ffffff;")
-        subtitle_label = QLabel("AMD GPU Donanım Hızlandırmalı Akıllı Dikte ve Sesli Yazma")
-        subtitle_label.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #ffffff;")
+        subtitle_label = QLabel("Yüksek Performanslı Sistem Geneli Sesli Yazma Asistanı")
+        subtitle_label.setStyleSheet("font-size: 13px; color: #94a3b8;")
         title_layout.addWidget(title_label)
         title_layout.addWidget(subtitle_label)
         header_layout.addLayout(title_layout)
@@ -58,7 +73,7 @@ class MainWindow(QMainWindow):
 
         # Action Buttons
         self.dictate_btn = QPushButton("🎙️ Dikteyi Başlat")
-        self.dictate_btn.setMinimumHeight(40)
+        self.dictate_btn.setMinimumHeight(42)
         self.dictate_btn.clicked.connect(self.on_dictate_btn_clicked)
         header_layout.addWidget(self.dictate_btn)
 
@@ -70,11 +85,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._create_audio_tab(), "🎤 Kısayol & Ses")
         self.tabs.addTab(self._create_ai_tab(), "🤖 Yapay Zeka Temizleyici")
         self.tabs.addTab(self._create_history_tab(), "📜 Dikte Geçmişi")
+        self.tabs.addTab(self._create_dev_tab(), "🛠️ Geliştirici & Canlı Log Konsolu")
         main_layout.addWidget(self.tabs)
 
         # --- Footer ---
         footer_layout = QHBoxLayout()
-        self.status_label = QLabel("Durum: Hazır | AMD GPU DirectML Aktif")
+        self.status_label = QLabel("Durum: Hazır | Donanım Hızlandırmalı Motor Aktif")
         self.status_label.setStyleSheet("color: #10b981; font-weight: bold;")
         footer_layout.addWidget(self.status_label)
         footer_layout.addStretch()
@@ -90,7 +106,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(widget)
 
         # STT Engine Selection
-        engine_group = QGroupBox("Çıkarım Motoru ve Donanım Hızlandırma")
+        engine_group = QGroupBox("Çıkarım Motoru ve Donanım Yapılandırması")
         engine_layout = QVBoxLayout(engine_group)
 
         h1 = QHBoxLayout()
@@ -110,6 +126,7 @@ class MainWindow(QMainWindow):
         h2.addWidget(QLabel("Whisper Model Boyutu:"))
         self.model_combo = QComboBox()
         self.model_combo.addItems(["tiny", "base", "small", "medium", "turbo"])
+        self.model_combo.currentTextChanged.connect(self.check_selected_model_status)
         h2.addWidget(self.model_combo)
         engine_layout.addLayout(h2)
 
@@ -123,6 +140,29 @@ class MainWindow(QMainWindow):
         engine_layout.addLayout(h3)
 
         layout.addWidget(engine_group)
+
+        # Local Model Downloader Group
+        model_group = QGroupBox("Yerel Model Durumu ve İndirme Yöneticisi")
+        m_layout = QVBoxLayout(model_group)
+
+        self.model_status_label = QLabel("Model Durumu Kontrol Ediliyor...")
+        self.model_status_label.setStyleSheet("color: #cbd5e1; font-weight: 500;")
+        m_layout.addWidget(self.model_status_label)
+
+        self.model_progress = QProgressBar()
+        self.model_progress.setRange(0, 100)
+        self.model_progress.setValue(0)
+        self.model_progress.setTextVisible(True)
+        m_layout.addWidget(self.model_progress)
+
+        h_dl = QHBoxLayout()
+        self.download_model_btn = QPushButton("📥 Seçilen Modeli Şimdi İndir")
+        self.download_model_btn.clicked.connect(self.download_selected_model)
+        h_dl.addWidget(self.download_model_btn)
+        h_dl.addStretch()
+        m_layout.addLayout(h_dl)
+
+        layout.addWidget(model_group)
 
         # Behavior settings
         behavior_group = QGroupBox("Davranış ve Otomasyon")
@@ -264,6 +304,90 @@ class MainWindow(QMainWindow):
         layout.addLayout(h)
         return widget
 
+    def _create_dev_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        dev_group = QGroupBox("Geliştirici Tanı Ekranı ve Canlı Log Konsolu")
+        d_layout = QVBoxLayout(dev_group)
+
+        self.log_console = QTextEdit()
+        self.log_console.setReadOnly(True)
+        self.log_console.setStyleSheet("background-color: #020617; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 11px;")
+        d_layout.addWidget(self.log_console)
+
+        h_btn = QHBoxLayout()
+        clear_log_btn = QPushButton("🧹 Konsolu Temizle")
+        clear_log_btn.clicked.connect(lambda: self.log_console.clear())
+        h_btn.addWidget(clear_log_btn)
+
+        test_sound_btn = QPushButton("🔊 Ses Testi Et")
+        test_sound_btn.clicked.connect(self.test_audio_input)
+        h_btn.addWidget(test_sound_btn)
+
+        h_btn.addStretch()
+        d_layout.addLayout(h_btn)
+
+        layout.addWidget(dev_group)
+        return widget
+
+    def _setup_log_stream(self):
+        handler = QtLogHandler()
+        handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+        handler.log_signal.connect(self._append_log)
+        logging.getLogger().addHandler(handler)
+
+    def _append_log(self, text: str):
+        self.log_console.append(text)
+
+    def test_audio_input(self):
+        devices = AudioRecorder.get_input_devices()
+        msg = f"Bulunan Mikrofon Sayısı: {len(devices)}\n\n"
+        for d in devices:
+            msg += f"• [{d['index']}] {d['name']} ({d['default_samplerate']}Hz, {d['channels']} ch)\n"
+        QMessageBox.information(self, "Mikrofon Tanı Bilgisi", msg)
+
+    def _connect_model_manager_signals(self):
+        model_manager.progress.connect(self._on_model_progress)
+        model_manager.download_finished.connect(self._on_model_download_finished)
+
+    def check_selected_model_status(self, model_name: str = None):
+        if not model_name:
+            model_name = self.model_combo.currentText()
+
+        is_downloaded = model_manager.is_model_downloaded(model_name)
+        if is_downloaded:
+            self.model_status_label.setText(f"✅ Model '{model_name}' hazır ve bilgisayarda yüklü.")
+            self.model_status_label.setStyleSheet("color: #10b981; font-weight: bold;")
+            self.model_progress.setValue(100)
+            self.download_model_btn.setEnabled(False)
+            self.download_model_btn.setText("✅ Model İndirilmiş")
+        else:
+            self.model_status_label.setText(f"⚠️ Model '{model_name}' henüz bilgisayara indirilmedi.")
+            self.model_status_label.setStyleSheet("color: #f59e0b; font-weight: bold;")
+            self.model_progress.setValue(0)
+            self.download_model_btn.setEnabled(True)
+            self.download_model_btn.setText("📥 Seçilen Modeli Şimdi İndir")
+
+    def download_selected_model(self):
+        model_name = self.model_combo.currentText()
+        self.download_model_btn.setEnabled(False)
+        self.download_model_btn.setText("⏳ İndiriliyor...")
+        model_manager.download_model_async(model_name)
+
+    def _on_model_progress(self, percent: int, msg: str):
+        self.model_progress.setValue(percent)
+        self.model_status_label.setText(f"⏳ {msg}")
+        self.model_status_label.setStyleSheet("color: #38bdf8; font-weight: bold;")
+
+    def _on_model_download_finished(self, model_name: str, success: bool, error_msg: str):
+        if success:
+            QMessageBox.information(self, "İndirme Tamamlandı", f"Whisper '{model_name}' modeli başarıyla indirildi ve kullanıma hazır.")
+            self.check_selected_model_status(model_name)
+        else:
+            QMessageBox.critical(self, "İndirme Hatası", f"Model indirilirken hata oluştu:\n{error_msg}")
+            self.check_selected_model_status(model_name)
+
     def refresh_mic_list(self):
         self.mic_combo.clear()
         self.mic_combo.addItem("Varsayılan Sistem Mikrofonu", None)
@@ -306,6 +430,7 @@ class MainWindow(QMainWindow):
         self.openai_key_input.setText(config_manager.get("api_key_openai", ""))
         self.prompt_edit.setText(config_manager.get("custom_prompt", ""))
 
+        self.check_selected_model_status(model)
         self.refresh_history_list()
 
     def save_ui_settings(self):
@@ -354,7 +479,6 @@ class MainWindow(QMainWindow):
         current_item = self.history_list.currentItem()
         if current_item:
             full_text = current_item.text()
-            # strip timestamp
             if "]" in full_text:
                 clean_text = full_text.split("]", 1)[1].strip()
             else:
@@ -378,7 +502,7 @@ class MainWindow(QMainWindow):
         else:
             self.dictate_btn.setText("🎙️ Dikteyi Başlat")
             self.dictate_btn.setStyleSheet("background-color: #6366f1; color: white;")
-            self.status_label.setText("Durum: Hazır | AMD GPU DirectML Aktif")
+            self.status_label.setText("Durum: Hazır | Donanım Hızlandırmalı Motor Aktif")
             self.status_label.setStyleSheet("color: #10b981; font-weight: bold;")
 
     def show_and_raise(self):
@@ -392,6 +516,5 @@ class MainWindow(QMainWindow):
             QApplication.quit()
 
     def closeEvent(self, event):
-        # Minimize to tray instead of quitting
         event.ignore()
         self.hide()

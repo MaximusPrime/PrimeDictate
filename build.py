@@ -15,9 +15,10 @@ def build():
     run_py = os.path.join(project_root, "run.py")
 
     # 1. Build Portable (.exe)
-    print("\n[1/2] Building Portable Edition (PrimeDictate-Portable.exe)...")
+    print("\n[1/3] Building Portable Edition (PrimeDictate-Portable.exe)...")
     cmd_portable = [
         venv_py, "-m", "PyInstaller",
+        "-y",
         "--noconsole",
         "--onefile",
         f"--icon={logo_path}",
@@ -32,10 +33,11 @@ def build():
     else:
         print("x Failed to build Portable Edition.")
 
-    # 2. Build Folder / Setup Package
-    print("\n[2/2] Building Directory Edition for Installer (dist/PrimeDictate)...")
+    # 2. Build Directory Edition
+    print("\n[2/3] Building Directory Edition (dist/PrimeDictate)...")
     cmd_dir = [
         venv_py, "-m", "PyInstaller",
+        "-y",
         "--noconsole",
         "--onedir",
         f"--icon={logo_path}",
@@ -46,14 +48,19 @@ def build():
     res2 = subprocess.run(cmd_dir, cwd=project_root)
     if res2.returncode == 0:
         print("✓ Directory Edition built successfully in 'dist/PrimeDictate'")
-        # Create Zip archive for setup/distribution
-        dist_dir = os.path.join(project_root, "dist")
-        target_dir = os.path.join(dist_dir, "PrimeDictate")
-        zip_path = os.path.join(dist_dir, "PrimeDictate-Setup-v1.0")
-        shutil.make_archive(zip_path, 'zip', target_dir)
-        print(f"✓ Setup Zip Archive created at '{zip_path}.zip'")
+
+    # 3. Build Windows Installer (.exe) with Inno Setup
+    print("\n[3/3] Building Windows Installer Wizard (PrimeDictate-Setup.exe)...")
+    iscc_path = r"C:\Users\MAXIMUS\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
+    iss_file = os.path.join(project_root, "installer.iss")
+    if os.path.exists(iscc_path) and os.path.exists(iss_file):
+        res3 = subprocess.run([iscc_path, f"/O{os.path.join(project_root, 'dist')}", iss_file], cwd=project_root)
+        if res3.returncode == 0:
+            print("✓ Windows Installer wizard created successfully in 'dist/PrimeDictate-Setup.exe'")
+        else:
+            print("x Inno Setup compilation failed.")
     else:
-        print("x Failed to build Directory Edition.")
+        print("Inno Setup ISCC compiler not found, skipping setup.exe creation.")
 
     print("\n==========================================")
     print(" Build process finished! Outputs in /dist ")

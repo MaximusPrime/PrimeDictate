@@ -133,10 +133,10 @@ class PrimeDictateApp:
             if text:
                 self.signals.transcription_complete.emit(text)
             else:
-                self.signals.status_changed.emit("Anlaşılamadı", "#ef4444")
+                self.signals.status_changed.emit("Anlaşılamadı veya Model Yüklenemedi", "#ef4444")
         except Exception as e:
             logger.error(f"Error processing dictation: {e}")
-            self.signals.status_changed.emit("Hata oluştu", "#ef4444")
+            self.signals.status_changed.emit(f"Hata: {e}", "#ef4444")
 
     def _on_transcription_complete(self, text: str):
         logger.info(f"Final transcription: '{text}'")
