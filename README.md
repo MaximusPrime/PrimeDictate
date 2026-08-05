@@ -43,7 +43,7 @@
 - Windows 10 / 11 (64-bit)
 - Python 3.12+
 
-### Setup
+### Setup & Run Source Code
 
 ```bash
 # Clone the repository
@@ -63,9 +63,28 @@ python run.py
 
 ---
 
+## 📦 Building Executables (Portable & Setup / Derleme)
+
+PrimeDictate includes an automated build script to generate standalone Windows binaries:
+
+```bash
+# Run build script to generate Portable & Setup packages
+python build.py
+```
+
+### Outputs in `dist/`:
+1. **Portable Edition (`dist/PrimeDictate-Portable.exe`)**:
+   - Single standalone `.exe` file.
+   - Runs instantly without installation. Ideal for USB drives or quick deployment.
+2. **Setup / Installer Package (`dist/PrimeDictate-Setup-v1.0.zip`)**:
+   - Complete application directory containing `PrimeDictate.exe` and dynamic libraries.
+   - Can be distributed as a zip or packaged with installer creators like Inno Setup or NSIS.
+
+---
+
 ## ⚙️ Configuration & Usage
 
-1. Launch PrimeDictate (`python run.py`).
+1. Launch PrimeDictate (`python run.py` or double-click `PrimeDictate-Portable.exe`).
 2. The control panel window will open and the system tray icon will appear.
 3. Focus any text input window (Notepad, VS Code, Word, Chrome).
 4. Press **`Ctrl+Alt+D`** (or your configured shortcut) to start recording.
@@ -79,6 +98,7 @@ python run.py
 ```
 PrimeDictate/
 ├── run.py                          # Main Entry Point & App Controller
+├── build.py                        # Automated Executable Builder (Portable & Setup)
 ├── requirements.txt                # Python Dependencies
 ├── PrimeDictate-Logo.png           # App Branding Logo
 └── src/
