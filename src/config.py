@@ -1,8 +1,29 @@
 import os
+import sys
 import json
 import logging
 
 logger = logging.getLogger("PrimeDictate.Config")
+
+def get_resource_path(relative_path: str) -> str:
+    """
+    Returns absolute path to resource, working for dev and PyInstaller bundle.
+    """
+    if hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Check root directory or current directory
+    path1 = os.path.join(base_path, relative_path)
+    if os.path.exists(path1):
+        return path1
+    
+    path2 = os.path.join(os.path.dirname(os.path.dirname(base_path)), relative_path)
+    if os.path.exists(path2):
+        return path2
+
+    return path1
 
 APP_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "PrimeDictate")
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
@@ -20,9 +41,10 @@ DEFAULT_CONFIG = {
     "api_key_openai": "",
     "api_key_gemini": "",
     "api_key_grok": "",
-    "custom_prompt": "Aşağıdaki dikte edilmiş metni Türkçe olarak imla ve dilbilgisi kurallarına uygun hale getir. 'eee', 'yani', 'hmmm', 'şey' gibi duraksama seslerini sil. Yalnızca düzeltilmiş nihai metni yanıt olarak döndür, açıklama veya tırnak ekleme.",
+    "custom_prompt": "Aşağıdaki dikte edilmiş metni Türkçe olarak imla ve dilbilgisi kurallarına uygun hale getir. 'eee', 'yani', 'hmmm' gibi duraksama seslerini sil. Yalnızca düzeltilmiş nihai metni yanıt olarak döndür, açıklama veya tırnak ekleme.",
     "audio_device_index": None,
     "auto_paste": True,
+    "restore_clipboard": True,
     "play_sound": True,
     "start_with_windows": False,
     "overlay_enabled": True,

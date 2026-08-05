@@ -3,8 +3,7 @@ import math
 from PySide6.QtCore import Qt, QTimer, QPoint, Signal
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QPixmap
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QVBoxLayout
-
-LOGO_PATH = r"c:\Users\MAXIMUS\PROJECTS\PrimeDictate-Project\PrimeDictate-Logo.png"
+from src.config import config_manager, get_resource_path
 
 class WaveVisualizer(QWidget):
     def __init__(self, parent=None):
@@ -25,7 +24,7 @@ class WaveVisualizer(QWidget):
         height = self.height()
         cy = height / 2.0
 
-        # Draw 5 dynamic audio wave bars
+        # Draw dynamic audio wave bars
         num_bars = 7
         bar_width = 4
         spacing = 6
@@ -39,7 +38,6 @@ class WaveVisualizer(QWidget):
             sin_factor = math.sin(self.phase + i * 0.8)
             bar_h = max(6.0, (self.level * 22.0) * (0.5 + 0.5 * sin_factor) + 4.0)
 
-            # Gradient color from violet to cyan
             color = QColor(99, 102, 241) if i % 2 == 0 else QColor(6, 182, 212)
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
@@ -58,6 +56,7 @@ class FloatingOverlay(QWidget):
         self.drag_position = QPoint()
 
         self._setup_ui()
+        self._load_position()
         self.hide()
 
     def _setup_ui(self):
@@ -81,8 +80,9 @@ class FloatingOverlay(QWidget):
 
         # Logo Icon
         self.logo_label = QLabel()
-        if os.path.exists(LOGO_PATH):
-            pix = QPixmap(LOGO_PATH).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        logo_path = get_resource_path("PrimeDictate-Logo.png")
+        if os.path.exists(logo_path):
+            pix = QPixmap(logo_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.logo_label.setPixmap(pix)
         else:
             self.logo_label.setText("🎙️")
@@ -100,6 +100,11 @@ class FloatingOverlay(QWidget):
 
         main_layout.addWidget(self.container)
 
+    def _load_position(self):
+        pos = config_manager.get("overlay_position", {"x": 100, "y": 100})
+        if isinstance(pos, dict) and "x" in pos and "y" in pos:
+            self.move(pos["x"], pos["y"])
+
     def set_status(self, text: str, color_hex: str = "#f8fafc"):
         self.status_label.setText(text)
         self.status_label.setStyleSheet(f"color: {color_hex}; font-weight: bold; font-size: 13px; border: none; background: transparent;")
@@ -115,4 +120,10 @@ class FloatingOverlay(QWidget):
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.LeftButton:
             self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = self.pos()
+            config_manager.set("overlay_position", {"x": pos.x(), "y": pos.y()})
             event.accept()

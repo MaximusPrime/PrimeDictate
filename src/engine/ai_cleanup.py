@@ -5,17 +5,13 @@ from src.config import config_manager
 
 logger = logging.getLogger("PrimeDictate.AICleanup")
 
-# Turkish & English common filler words and hesitation sounds
+# Context-aware hesitation sounds (matches isolated "eee", "hmmm", "ııı", etc.)
 FILLER_PATTERNS = [
-    r'\b(e+)+(\b|\s)',
-    r'\b(h+m+)+(\b|\s)',
-    r'\b(ı+h+m+)+(\b|\s)',
-    r'\b(yani)\b',
-    r'\b(şey)\b',
-    r'\b(uh+)\b',
-    r'\b(um+)\b',
-    r'\b(er+)\b',
-    r'\b(ah+)\b',
+    (r'(?i)\b(e{2,}|ı{2,}|a{2,})\b', ''),            # isolated "eee", "ııı"
+    (r'(?i)\b(h+m+)+(\b|\s)', ''),                  # isolated "hmmm", "hm"
+    (r'(?i)\b(ı+h+m+)+(\b|\s)', ''),                # isolated "ıhm"
+    (r'(?i)^\s*(yani|şey|ee|ıı)\s*,\s*', ''),       # hesitation at start of sentence
+    (r'(?i)\s+,\s*(yani|şey|ee|ıı)\s*,', ','),      # hesitation inside pauses
 ]
 
 class AICleanupEngine:
@@ -60,12 +56,13 @@ class AICleanupEngine:
 
     def _clean_rule_based(self, text: str) -> str:
         cleaned = text
-        # Remove filler words
-        for pattern in FILLER_PATTERNS:
-            cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
 
-        # Fix multiple spaces
+        for pattern, replacement in FILLER_PATTERNS:
+            cleaned = re.sub(pattern, replacement, cleaned)
+
+        # Fix multiple spaces and punctuation formatting
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = re.sub(r'\s+([.,!?:;])', r'\1', cleaned)
 
         # Ensure sentence starts with capital letter
         if cleaned and len(cleaned) > 0:
@@ -97,7 +94,6 @@ class AICleanupEngine:
             resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=5)
             if resp.status_code == 200:
                 result = resp.json()['choices'][0]['message']['content'].strip()
-                # strip surrounding quotes if present
                 if result.startswith('"') and result.endswith('"'):
                     result = result[1:-1]
                 logger.info(f"Groq LLM cleaned: '{text}' -> '{result}'")
@@ -147,8 +143,6 @@ class AICleanupEngine:
                     result = result[1:-1]
                 logger.info(f"Gemini LLM cleaned: '{text}' -> '{result}'")
                 return result
-            else:
-                logger.warning(f"Gemini API returned status {resp.status_code}: {resp.text}")
         except Exception as e:
             logger.error(f"Gemini LLM cleanup failed: {e}")
         return None
@@ -175,8 +169,6 @@ class AICleanupEngine:
                     result = result[1:-1]
                 logger.info(f"xAI Grok LLM cleaned: '{text}' -> '{result}'")
                 return result
-            else:
-                logger.warning(f"xAI Grok API returned status {resp.status_code}: {resp.text}")
         except Exception as e:
             logger.error(f"xAI Grok LLM cleanup failed: {e}")
         return None

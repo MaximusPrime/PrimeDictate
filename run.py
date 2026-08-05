@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
-from src.config import config_manager
+from src.config import config_manager, get_resource_path
 from src.audio.recorder import AudioRecorder
 from src.audio.vad import trim_silence, is_audio_meaningful
 from src.engine.engine_manager import engine_manager
@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PrimeDictate.AppController")
 
-LOGO_PATH = r"c:\Users\MAXIMUS\PROJECTS\PrimeDictate-Project\PrimeDictate-Logo.png"
+LOGO_PATH = get_resource_path("PrimeDictate-Logo.png")
 
 class AppSignals(QObject):
     recording_started = Signal()
@@ -149,9 +149,7 @@ class PrimeDictateApp:
 
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status("Aktarıldı! ✓", "#10b981")
-            QApplication.processEvents()
-            # Hide overlay after 1.5s
-            threading.Timer(1.5, lambda: self.overlay.hide()).start()
+            QTimer.singleShot(1500, self.overlay.hide)
 
     def _on_audio_level(self, level: float):
         if config_manager.get("overlay_enabled", True):
@@ -161,7 +159,7 @@ class PrimeDictateApp:
     def _on_status_changed(self, msg: str, color_hex: str):
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status(msg, color_hex)
-            threading.Timer(1.5, lambda: self.overlay.hide()).start()
+            QTimer.singleShot(1800, self.overlay.hide)
 
     def run(self):
         self.main_window.show()

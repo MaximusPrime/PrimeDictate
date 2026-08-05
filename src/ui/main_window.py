@@ -9,12 +9,12 @@ from PySide6.QtWidgets import (
     QGroupBox, QComboBox, QLineEdit, QPushButton, QCheckBox, QTextEdit,
     QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QApplication
 )
-from src.config import config_manager
+from src.config import config_manager, get_resource_path
 from src.audio.recorder import AudioRecorder
 from src.engine.model_manager import model_manager
 from src.ui.styles import DARK_GLASS_STYLE
 
-LOGO_PATH = r"c:\Users\MAXIMUS\PROJECTS\PrimeDictate-Project\PrimeDictate-Logo.png"
+LOGO_PATH = get_resource_path("PrimeDictate-Logo.png")
 
 class QtLogHandler(logging.Handler, QObject):
     log_signal = Signal(str)
