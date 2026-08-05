@@ -2,11 +2,11 @@
   <img src="PrimeDictate-Logo.png" alt="PrimeDictate Logo" width="128"/>
 </p>
 
-<h1 align="center">PrimeDictate</h1>
+<h1 align="center">PrimeDictate Pro</h1>
 
 <p align="center">
-  <b>System-wide Speech-to-Text & AI Voice Typing Application for Windows</b><br/>
-  <i>Hardware-Accelerated for AMD GPUs (DirectML), NVIDIA GPUs (CUDA), Vulkan, and CPU, with Multi-LLM AI Text Cleanup.</i>
+  <b>System-wide Speech-to-Text & AI Voice Assistant Application for Windows</b><br/>
+  <i>Hardware-Accelerated for AMD GPUs (DirectML), NVIDIA GPUs (CUDA), Vulkan, and CPU, with Local/Cloud LLM AI Assistant & Rule Engine.</i>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/UI-PySide6-41CD52?style=flat-square&logo=qt" alt="PySide6"/>
   <img src="https://img.shields.io/badge/AMD_GPU-DirectML-ED1C24?style=flat-square&logo=amd" alt="AMD GPU"/>
   <img src="https://img.shields.io/badge/NVIDIA_GPU-CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA GPU"/>
-  <img src="https://img.shields.io/badge/Vulkan-Cross--GPU-E23126?style=flat-square&logo=vulkan" alt="Vulkan"/>
+  <img src="https://img.shields.io/badge/Ollama-Local_LLM-000000?style=flat-square" alt="Ollama"/>
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License"/>
 </p>
 
@@ -23,18 +23,29 @@
 
 ## 🚀 Key Features
 
-- 🎙️ **System-wide Global Dictation**: Press a custom hotkey (`Ctrl+Alt+D` or `F9`) from any application to record voice and auto-paste clean text instantly.
+- 🎙️ **System-wide Global Dictation**: Press a custom hotkey (`Ctrl+Alt+D` or `F9`) from any window to record voice and auto-paste clean text instantly.
+- 🧠 **AI Assistant & Command Mode**: Switch from standard dictation to **AI Assistant Mode** to issue spoken commands (*"Summarize this text"*, *"Translate to English"*, *"Write a formal email"*). PrimeDictate executes your spoken instruction via AI and pastes the answer into your focused window!
+- 📝 **5 Preset Prompt Rule Templates & Custom Rules**:
+  - 📝 **Standard Dictation Cleanup**: Strips "eee", "hmmm", "yani", "şey" hesitation sounds, fixes punctuation and capitalization.
+  - 💼 **Formal Business Language**: Rewrites spoken voice into polished, professional corporate correspondence.
+  - 💻 **Coding & Tech Term Protection**: Preserves technical jargon, library names, and `CamelCase` / `snake_case` code variables.
+  - 🌐 **Instant English Translation**: Translates Turkish spoken voice instantly to fluent English text.
+  - 📊 **Summarize & Bullet Points**: Summarizes long audio into structured bullet points.
+  - ✏️ **Custom User Rules**: Define your own custom AI instructions and rules.
 - ⚡ **Multi-Hardware STT Acceleration**:
-  - **AMD GPUs**: Accelerated via Microsoft DirectML (DirectX 12) for all Radeon RX & Ryzen APUs.
-  - **NVIDIA GPUs**: Accelerated via CUDA & cuDNN (float16 / int8).
+  - **AMD GPUs**: Native DirectX 12 DirectML hardware acceleration for Radeon RX GPUs & Ryzen APUs.
+  - **NVIDIA GPUs**: CUDA & cuDNN (float16 / int8).
   - **Vulkan & CPU**: Cross-platform Vulkan compute shaders and multi-core CPU fallbacks.
-  - **Cloud STT**: Sub-0.3s transcription using Groq Whisper API or OpenAI Whisper.
-- 🤖 **Multi-LLM AI Text Cleanup**:
-  - Automatically strips hesitation sounds ("eee", "hmmm", "yani", "şey") and fixes grammar & punctuation.
-  - Supports **Google Gemini 2.5 Flash**, **xAI Grok (Grok-Beta)**, **Groq (Llama 3.3 70B)**, **OpenAI (GPT-4o Mini)**, or local rule-based engine.
-- 💬 **Clipboard Auto-Paste**: Safely copies text to clipboard and triggers synthetic `Ctrl+V` to inject into active windows (Notepad, Word, VS Code, Browser, WhatsApp, etc.).
-- 🌊 **Floating Audio Wave Visualizer**: Draggable, frameless, semi-transparent overlay pill showing live microphone volume waves and transcription state.
-- 📌 **System Tray Integration**: Quiet background operation with quick access context menu.
+  - **Cloud STT**: Sub-0.3s transcription via Groq Whisper API or OpenAI Whisper.
+- 🌐 **Local & Custom LLM Support (Ollama / LM Studio / OpenRouter)**:
+  - Connect to local AI models running on **Ollama** (`http://localhost:11434/v1`), **LM Studio**, or **OpenRouter** (`llama3.2`, `qwen2.5-coder`, `mistral`).
+  - Native support for **Google Gemini 2.5 Flash**, **xAI Grok (Grok-Beta)**, **Groq (Llama 3.3 70B)**, and **OpenAI (GPT-4o Mini)**.
+- 📁 **Audio & Video File Transcriber**: Dedicated tab to transcribe `.mp3`, `.wav`, `.mp4`, `.m4a`, `.mkv` media files into formatted text or subtitles.
+- 📥 **Async Local Model Downloader**: Progress bar (%0-%100) manager to check and download local HuggingFace Whisper models (`tiny`, `base`, `small`, `medium`, `turbo`) safely.
+- 🔒 **Clipboard Auto-Paste & Restoration**: Safely pastes via `Ctrl+V` and automatically restores your previous clipboard content after 0.6s.
+- 🛠️ **Dev Mode Live Diagnostic Console**: Live log stream tab for debugging audio devices, sample rates, model downloads, and API responses.
+- 🌊 **Floating Audio Wave Visualizer**: Position-remembering, frameless, semi-transparent overlay pill showing live volume waves and state.
+- 📌 **System Tray Integration**: Background operation with quick access tray menu.
 
 ---
 
@@ -75,22 +86,9 @@ python build.py
 
 ### Outputs in `dist/`:
 1. **Portable Edition (`dist/PrimeDictate-Portable.exe`)**:
-   - Single standalone `.exe` file.
-   - Runs instantly without installation. Ideal for USB drives or quick deployment.
-2. **Setup / Installer Package (`dist/PrimeDictate-Setup-v1.0.zip`)**:
-   - Complete application directory containing `PrimeDictate.exe` and dynamic libraries.
-   - Can be distributed as a zip or packaged with installer creators like Inno Setup or NSIS.
-
----
-
-## ⚙️ Configuration & Usage
-
-1. Launch PrimeDictate (`python run.py` or double-click `PrimeDictate-Portable.exe`).
-2. The control panel window will open and the system tray icon will appear.
-3. Focus any text input window (Notepad, VS Code, Word, Chrome).
-4. Press **`Ctrl+Alt+D`** (or your configured shortcut) to start recording.
-5. Speak into your microphone and press the shortcut again (or release the key).
-6. PrimeDictate will transcribe, clean, and auto-paste the text into your active window.
+   - Standalone `.exe` file running without installation.
+2. **Windows Installer Setup (`dist/PrimeDictate-Setup.exe`)**:
+   - Complete setup wizard created via Inno Setup (`ISCC.exe`).
 
 ---
 
@@ -100,27 +98,30 @@ python build.py
 PrimeDictate/
 ├── run.py                          # Main Entry Point & App Controller
 ├── build.py                        # Automated Executable Builder (Portable & Setup)
+├── installer.iss                   # Inno Setup Wizard Script
 ├── requirements.txt                # Python Dependencies
 ├── PrimeDictate-Logo.png           # App Branding Logo
 └── src/
-    ├── config.py                   # App Configuration Manager
+    ├── config.py                   # App Configuration Manager & Prompt Presets
     ├── audio/
-    │   ├── recorder.py             # Low-latency Audio Stream & RMS Meter
-    │   └── vad.py                  # Voice Activity Detection & Silence Trimming
+    │   ├── recorder.py             # Low-latency Audio Stream & Resampler (44.1/48kHz -> 16kHz)
+    │   └── vad.py                  # Voice Activity Detection & Micro-Recording Filter
     ├── engine/
     │   ├── engine_manager.py       # STT Engine Manager (CUDA/DirectML/Vulkan/Cloud)
+    │   ├── model_manager.py        # HuggingFace Model Downloader & Progress Manager
+    │   ├── file_transcriber.py     # Audio & Video File Transcription Worker
     │   ├── stt_cuda.py             # NVIDIA GPU CUDA Engine
     │   ├── stt_directml.py         # AMD GPU DirectML Engine
     │   ├── stt_vulkan.py           # Vulkan Engine
     │   ├── stt_cloud.py            # Groq & OpenAI Cloud STT Engine
-    │   └── ai_cleanup.py           # AI Text Cleaner (Gemini/Grok/Groq/OpenAI)
+    │   └── ai_cleanup.py           # Multi-LLM AI Text Cleaner & Ollama Endpoint Client
     ├── hotkey/
     │   └── listener.py             # Win32 Global Hotkey Listener
     ├── injector/
-    │   └── paste_injector.py       # Safe Clipboard & Ctrl+V Injector
+    │   └── paste_injector.py       # Safe Clipboard & Active Window Injector
     └── ui/
-        ├── main_window.py          # PySide6 Control Panel & Settings UI
-        ├── floating_overlay.py     # Floating Audio Visualizer Overlay Pill
+        ├── main_window.py          # PySide6 Control Panel, AI Rules & File Transcriber UI
+        ├── floating_overlay.py     # Position-Remembering Audio Visualizer Overlay Pill
         ├── styles.py               # Dark Glassmorphism Qt Stylesheet
         └── tray_icon.py            # Windows System Tray Integration
 ```
