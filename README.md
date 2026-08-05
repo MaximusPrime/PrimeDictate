@@ -16,6 +16,7 @@
   <img src="https://img.shields.io/badge/AMD_GPU-DirectML-ED1C24?style=flat-square&logo=amd" alt="AMD GPU"/>
   <img src="https://img.shields.io/badge/NVIDIA_GPU-CUDA-76B900?style=flat-square&logo=nvidia" alt="NVIDIA GPU"/>
   <img src="https://img.shields.io/badge/Vulkan-Cross--GPU-E23126?style=flat-square&logo=vulkan" alt="Vulkan"/>
+  <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License"/>
 </p>
 
 ---
@@ -63,7 +64,7 @@ python run.py
 
 ---
 
-## 📦 Building Executables (Portable & Setup / Derleme)
+## 📦 Building Executables (Portable & Setup)
 
 PrimeDictate includes an automated build script to generate standalone Windows binaries:
 
@@ -128,4 +129,4 @@ PrimeDictate/
 
 ## 📄 License
 
-MIT License © 2026 [MaximusPrime](https://github.com/MaximusPrime)
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** - see the [LICENSE](LICENSE) file for details.
