@@ -7,11 +7,13 @@ from PySide6.QtGui import QIcon, QPixmap, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
     QGroupBox, QComboBox, QLineEdit, QPushButton, QCheckBox, QTextEdit,
-    QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QApplication
+    QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QApplication,
+    QFileDialog, QRadioButton, QButtonGroup
 )
-from src.config import config_manager, get_resource_path
+from src.config import config_manager, get_resource_path, PRESET_PROMPTS
 from src.audio.recorder import AudioRecorder
 from src.engine.model_manager import model_manager
+from src.engine.file_transcriber import FileTranscribeWorker
 from src.ui.styles import DARK_GLASS_STYLE
 
 LOGO_PATH = get_resource_path("PrimeDictate-Logo.png")
@@ -33,13 +35,14 @@ class MainWindow(QMainWindow):
     def __init__(self, app_controller=None):
         super().__init__()
         self.app_controller = app_controller
-        self.setWindowTitle("PrimeDictate - Windows Sesli Yazma Asistanı")
-        self.resize(800, 680)
+        self.setWindowTitle("PrimeDictate - Pro Sesli Yazma ve Yapay Zeka Asistanı")
+        self.resize(860, 720)
         self.setStyleSheet(DARK_GLASS_STYLE)
 
         if os.path.exists(LOGO_PATH):
             self.setWindowIcon(QIcon(LOGO_PATH))
 
+        self.transcribe_worker = None
         self._setup_ui()
         self.load_settings_to_ui()
         self._setup_log_stream()
@@ -57,14 +60,14 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout()
         logo_img = QLabel()
         if os.path.exists(LOGO_PATH):
-            pix = QPixmap(LOGO_PATH).scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pix = QPixmap(LOGO_PATH).scaled(44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             logo_img.setPixmap(pix)
         header_layout.addWidget(logo_img)
 
         title_layout = QVBoxLayout()
-        title_label = QLabel("PrimeDictate")
+        title_label = QLabel("PrimeDictate Pro")
         title_label.setStyleSheet("font-size: 22px; font-weight: bold; color: #ffffff;")
-        subtitle_label = QLabel("Yüksek Performanslı Sistem Geneli Sesli Yazma Asistanı")
+        subtitle_label = QLabel("Yüksek Performanslı Sesli Yazma ve Yapay Zeka Komut Asistanı")
         subtitle_label.setStyleSheet("font-size: 13px; color: #94a3b8;")
         title_layout.addWidget(title_label)
         title_layout.addWidget(subtitle_label)
@@ -82,10 +85,11 @@ class MainWindow(QMainWindow):
         # --- Tabs ---
         self.tabs = QTabWidget()
         self.tabs.addTab(self._create_general_tab(), "⚙️ Genel & Motor")
+        self.tabs.addTab(self._create_ai_tab(), "🤖 Yapay Zeka & Kurallar")
+        self.tabs.addTab(self._create_file_transcribe_tab(), "📁 Ses/Video Çevirici")
         self.tabs.addTab(self._create_audio_tab(), "🎤 Kısayol & Ses")
-        self.tabs.addTab(self._create_ai_tab(), "🤖 Yapay Zeka Temizleyici")
         self.tabs.addTab(self._create_history_tab(), "📜 Dikte Geçmişi")
-        self.tabs.addTab(self._create_dev_tab(), "🛠️ Geliştirici & Canlı Log Konsolu")
+        self.tabs.addTab(self._create_dev_tab(), "🛠️ Canlı Log Konsolu")
         main_layout.addWidget(self.tabs)
 
         # --- Footer ---
@@ -104,6 +108,16 @@ class MainWindow(QMainWindow):
     def _create_general_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+
+        # Operation Mode Selection
+        mode_group = QGroupBox("Çalışma Modu")
+        m_box = QHBoxLayout(mode_group)
+        self.mode_dictation_rb = QRadioButton("🎙️ Dikte Modu (Konuşulanı Aynen/Temizleyerek Yaz)")
+        self.mode_assistant_rb = QRadioButton("🧠 Yapay Zeka Komut Asistanı (Söylenen Komutu Uygula & Cevabı Yaz)")
+        self.mode_dictation_rb.setChecked(True)
+        m_box.addWidget(self.mode_dictation_rb)
+        m_box.addWidget(self.mode_assistant_rb)
+        layout.addWidget(mode_group)
 
         # STT Engine Selection
         engine_group = QGroupBox("Çıkarım Motoru ve Donanım Yapılandırması")
@@ -169,10 +183,12 @@ class MainWindow(QMainWindow):
         b_layout = QVBoxLayout(behavior_group)
 
         self.auto_paste_cb = QCheckBox("Dikte edilen metni otomatik aktif pencereye yapıştır (Ctrl+V)")
+        self.restore_clip_cb = QCheckBox("Yapıştırma sonrası eski panoyu otomatik geri yükle")
         self.play_sound_cb = QCheckBox("Kayıt başlarken ve biterken sesli uyarı ver")
         self.overlay_cb = QCheckBox("Ekran üzerinde yüzen ses dalgası kapsülünü (Overlay Widget) göster")
 
         b_layout.addWidget(self.auto_paste_cb)
+        b_layout.addWidget(self.restore_clip_cb)
         b_layout.addWidget(self.play_sound_cb)
         b_layout.addWidget(self.overlay_cb)
 
@@ -180,11 +196,182 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return widget
 
+    def _create_ai_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        cleanup_group = QGroupBox("Yapay Zeka Temizleme ve Kurallar")
+        c_layout = QVBoxLayout(cleanup_group)
+
+        self.ai_cleanup_cb = QCheckBox("Akıllı Yapay Zeka İşlemesini Etkinleştir")
+        c_layout.addWidget(self.ai_cleanup_cb)
+
+        h1 = QHBoxLayout()
+        h1.addWidget(QLabel("Yapay Zeka Servis Sağlayıcısı:"))
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItem("Hızlı Kural Tabanlı Motor (Yerel & Ücretsiz)", "rule_based")
+        self.ai_provider_combo.addItem("Özel Yerel LLM (Ollama / LM Studio / OpenRouter)", "custom_ollama")
+        self.ai_provider_combo.addItem("Google Gemini 2.5 Flash API", "gemini")
+        self.ai_provider_combo.addItem("xAI Grok API (Grok-Beta)", "grok")
+        self.ai_provider_combo.addItem("Groq LLM (Llama 3.3 70B)", "groq")
+        self.ai_provider_combo.addItem("OpenAI LLM (GPT-4o Mini)", "openai")
+        h1.addWidget(self.ai_provider_combo)
+        c_layout.addLayout(h1)
+
+        # Preset Rule Selector
+        h_preset = QHBoxLayout()
+        h_preset.addWidget(QLabel("Hazır Kural Şablonu:"))
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("📝 Standart İmla & Düzeltme Modu", "standard")
+        self.preset_combo.addItem("💼 Resmi İş & E-posta Dili", "formal")
+        self.preset_combo.addItem("💻 Kodlama & Yazılım Terimleri Koruma", "coding")
+        self.preset_combo.addItem("🌐 Anında İngilizceye Çevir", "translate_en")
+        self.preset_combo.addItem("📊 Maddeler Haline Getir & Özetle", "summarize")
+        h_preset.addWidget(self.preset_combo)
+        c_layout.addLayout(h_preset)
+
+        # Custom Endpoint for Ollama / LM Studio
+        h_ollama = QHBoxLayout()
+        h_ollama.addWidget(QLabel("Yerel/Özel API Base URL:"))
+        self.custom_url_input = QLineEdit()
+        self.custom_url_input.setPlaceholderText("http://localhost:11434/v1")
+        h_ollama.addWidget(self.custom_url_input)
+        h_ollama.addWidget(QLabel("Model Adı:"))
+        self.custom_model_input = QLineEdit()
+        self.custom_model_input.setPlaceholderText("llama3.2")
+        h_ollama.addWidget(self.custom_model_input)
+        c_layout.addLayout(h_ollama)
+
+        # API Keys
+        h_keys = QHBoxLayout()
+        h_keys.addWidget(QLabel("Gemini Key:"))
+        self.gemini_key_input = QLineEdit()
+        self.gemini_key_input.setEchoMode(QLineEdit.Password)
+        h_keys.addWidget(self.gemini_key_input)
+
+        h_keys.addWidget(QLabel("Grok Key:"))
+        self.grok_key_input = QLineEdit()
+        self.grok_key_input.setEchoMode(QLineEdit.Password)
+        h_keys.addWidget(self.grok_key_input)
+        c_layout.addLayout(h_keys)
+
+        h_keys2 = QHBoxLayout()
+        h_keys2.addWidget(QLabel("Groq Key:"))
+        self.groq_key_input = QLineEdit()
+        self.groq_key_input.setEchoMode(QLineEdit.Password)
+        h_keys2.addWidget(self.groq_key_input)
+
+        h_keys2.addWidget(QLabel("OpenAI Key:"))
+        self.openai_key_input = QLineEdit()
+        self.openai_key_input.setEchoMode(QLineEdit.Password)
+        h_keys2.addWidget(self.openai_key_input)
+        c_layout.addLayout(h_keys2)
+
+        c_layout.addWidget(QLabel("Özel Kullanıcı Kuralları (Ek Talimatlar):"))
+        self.custom_rules_edit = QTextEdit()
+        self.custom_rules_edit.setPlaceholderText("Örn: Her zaman Türkçe cevap ver, özel isimleri koru, üslubu dostane yap...")
+        self.custom_rules_edit.setMaximumHeight(80)
+        c_layout.addWidget(self.custom_rules_edit)
+
+        layout.addWidget(cleanup_group)
+        layout.addStretch()
+        return widget
+
+    def _create_file_transcribe_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        group = QGroupBox("Ses veya Video Dosyasını Metne Çevir (.mp3, .wav, .mp4, .m4a)")
+        g_layout = QVBoxLayout(group)
+
+        h_file = QHBoxLayout()
+        self.file_path_input = QLineEdit()
+        self.file_path_input.setPlaceholderText("Bir ses veya video dosyası seçin...")
+        h_file.addWidget(self.file_path_input)
+
+        browse_btn = QPushButton("📁 Gözat...")
+        browse_btn.clicked.connect(self.browse_audio_file)
+        h_file.addWidget(browse_btn)
+
+        self.transcribe_file_btn = QPushButton("⚡ Çeviriyi Başlat")
+        self.transcribe_file_btn.clicked.connect(self.start_file_transcription)
+        h_file.addWidget(self.transcribe_file_btn)
+        g_layout.addLayout(h_file)
+
+        self.file_progress = QProgressBar()
+        self.file_progress.setRange(0, 100)
+        self.file_progress.setValue(0)
+        g_layout.addWidget(self.file_progress)
+
+        g_layout.addWidget(QLabel("Çevrilen Metin:"))
+        self.file_result_edit = QTextEdit()
+        g_layout.addWidget(self.file_result_edit)
+
+        h_actions = QHBoxLayout()
+        copy_file_text_btn = QPushButton("📋 Metni Kopyala")
+        copy_file_text_btn.clicked.connect(lambda: QApplication.clipboard().setText(self.file_result_edit.toPlainText()))
+        h_actions.addWidget(copy_file_text_btn)
+
+        save_file_text_btn = QPushButton("💾 Metni Dosyaya Kaydet")
+        save_file_text_btn.clicked.connect(self.save_file_text)
+        h_actions.addWidget(save_file_text_btn)
+        h_actions.addStretch()
+
+        g_layout.addLayout(h_actions)
+        layout.addWidget(group)
+        return widget
+
+    def browse_audio_file(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Ses/Video Dosyası Seç", "", "Ses ve Video Dosyaları (*.mp3 *.wav *.mp4 *.m4a *.mkv *.flac *.ogg)")
+        if file_name:
+            self.file_path_input.setText(file_name)
+
+    def start_file_transcription(self):
+        file_path = self.file_path_input.text().strip()
+        if not file_path or not os.path.exists(file_path):
+            QMessageBox.warning(self, "Hata", "Lütfen geçerli bir ses/video dosyası seçin.")
+            return
+
+        self.transcribe_file_btn.setEnabled(False)
+        self.file_progress.setValue(10)
+        self.file_result_edit.setText("Çeviri işlemi başlatılıyor...")
+
+        self.transcribe_worker = FileTranscribeWorker(file_path)
+        self.transcribe_worker.progress.connect(self._on_file_progress)
+        self.transcribe_worker.finished.connect(self._on_file_finished)
+        self.transcribe_worker.error.connect(self._on_file_error)
+        self.transcribe_worker.start()
+
+    def _on_file_progress(self, percent: int, msg: str):
+        self.file_progress.setValue(percent)
+        self.status_label.setText(f"Dosya Çeviriliyor: {msg}")
+
+    def _on_file_finished(self, file_path: str, text: str):
+        self.transcribe_file_btn.setEnabled(True)
+        self.file_progress.setValue(100)
+        self.file_result_edit.setText(text)
+        self.status_label.setText("Dosya çevirisi tamamlandı!")
+        QMessageBox.information(self, "Başarılı", "Dosya transkripsiyonu tamamlandı.")
+
+    def _on_file_error(self, err: str):
+        self.transcribe_file_btn.setEnabled(True)
+        self.file_progress.setValue(0)
+        QMessageBox.critical(self, "Hata", f"Dosya çevrilirken hata oluştu:\n{err}")
+
+    def save_file_text(self):
+        text = self.file_result_edit.toPlainText()
+        if not text:
+            return
+        file_name, _ = QFileDialog.getSaveFileName(self, "Metni Kaydet", "transkripsiyon.txt", "Metin Dosyası (*.txt)")
+        if file_name:
+            with open(file_name, "w", encoding="utf-8") as f:
+                f.write(text)
+            QMessageBox.information(self, "Kaydedildi", f"Metin kaydedildi: {file_name}")
+
     def _create_audio_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # Hotkey Group
         hotkey_group = QGroupBox("Küresel Kısayol Tuşu")
         hk_layout = QVBoxLayout(hotkey_group)
 
@@ -205,7 +392,6 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(hotkey_group)
 
-        # Audio Devices
         audio_group = QGroupBox("Mikrofon Girişi")
         a_layout = QVBoxLayout(audio_group)
 
@@ -222,64 +408,6 @@ class MainWindow(QMainWindow):
         a_layout.addWidget(self.mic_progress)
 
         layout.addWidget(audio_group)
-        layout.addStretch()
-        return widget
-
-    def _create_ai_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        cleanup_group = QGroupBox("Yapay Zeka Metin Temizleme ve Noktalama")
-        c_layout = QVBoxLayout(cleanup_group)
-
-        self.ai_cleanup_cb = QCheckBox("Akıllı Metin Temizlemeyi Etkinleştir (Dolgu kelimelerini, 'eee', 'yani' seslerini siler)")
-        c_layout.addWidget(self.ai_cleanup_cb)
-
-        h1 = QHBoxLayout()
-        h1.addWidget(QLabel("Temizleme Motoru:"))
-        self.ai_provider_combo = QComboBox()
-        self.ai_provider_combo.addItem("Hızlı Kural Tabanlı Motor (Yerel & Ücretsiz)", "rule_based")
-        self.ai_provider_combo.addItem("Google Gemini 2.5 Flash API", "gemini")
-        self.ai_provider_combo.addItem("xAI Grok API (Grok-Beta)", "grok")
-        self.ai_provider_combo.addItem("Groq LLM (Llama 3.3 70B)", "groq")
-        self.ai_provider_combo.addItem("OpenAI LLM (GPT-4o Mini)", "openai")
-        h1.addWidget(self.ai_provider_combo)
-        c_layout.addLayout(h1)
-
-        h_gemini = QHBoxLayout()
-        h_gemini.addWidget(QLabel("Google Gemini API Key:"))
-        self.gemini_key_input = QLineEdit()
-        self.gemini_key_input.setEchoMode(QLineEdit.Password)
-        h_gemini.addWidget(self.gemini_key_input)
-        c_layout.addLayout(h_gemini)
-
-        h_grok = QHBoxLayout()
-        h_grok.addWidget(QLabel("xAI Grok API Key:"))
-        self.grok_key_input = QLineEdit()
-        self.grok_key_input.setEchoMode(QLineEdit.Password)
-        h_grok.addWidget(self.grok_key_input)
-        c_layout.addLayout(h_grok)
-
-        h2 = QHBoxLayout()
-        h2.addWidget(QLabel("Groq API Key:"))
-        self.groq_key_input = QLineEdit()
-        self.groq_key_input.setEchoMode(QLineEdit.Password)
-        h2.addWidget(self.groq_key_input)
-        c_layout.addLayout(h2)
-
-        h3 = QHBoxLayout()
-        h3.addWidget(QLabel("OpenAI API Key:"))
-        self.openai_key_input = QLineEdit()
-        self.openai_key_input.setEchoMode(QLineEdit.Password)
-        h3.addWidget(self.openai_key_input)
-        c_layout.addLayout(h3)
-
-        c_layout.addWidget(QLabel("Özel Yapay Zeka Promptu:"))
-        self.prompt_edit = QTextEdit()
-        self.prompt_edit.setMaximumHeight(80)
-        c_layout.addWidget(self.prompt_edit)
-
-        layout.addWidget(cleanup_group)
         layout.addStretch()
         return widget
 
@@ -321,7 +449,7 @@ class MainWindow(QMainWindow):
         clear_log_btn.clicked.connect(lambda: self.log_console.clear())
         h_btn.addWidget(clear_log_btn)
 
-        test_sound_btn = QPushButton("🔊 Ses Testi Et")
+        test_sound_btn = QPushButton("🔊 Mikrofon Tanı Bilgisi")
         test_sound_btn.clicked.connect(self.test_audio_input)
         h_btn.addWidget(test_sound_btn)
 
@@ -396,6 +524,12 @@ class MainWindow(QMainWindow):
             self.mic_combo.addItem(f"{dev['name']}", dev['index'])
 
     def load_settings_to_ui(self):
+        op_mode = config_manager.get("operation_mode", "dictation")
+        if op_mode == "assistant":
+            self.mode_assistant_rb.setChecked(True)
+        else:
+            self.mode_dictation_rb.setChecked(True)
+
         backend = config_manager.get("stt_backend", "directml")
         backend_idx_map = {"cuda": 0, "directml": 1, "vulkan": 2, "cpu": 3, "cloud": 4}
         self.backend_combo.setCurrentIndex(backend_idx_map.get(backend, 1))
@@ -409,6 +543,7 @@ class MainWindow(QMainWindow):
             self.lang_combo.setCurrentIndex(lang_idx)
 
         self.auto_paste_cb.setChecked(config_manager.get("auto_paste", True))
+        self.restore_clip_cb.setChecked(config_manager.get("restore_clipboard", True))
         self.play_sound_cb.setChecked(config_manager.get("play_sound", True))
         self.overlay_cb.setChecked(config_manager.get("overlay_enabled", True))
 
@@ -424,37 +559,51 @@ class MainWindow(QMainWindow):
         if p_idx >= 0:
             self.ai_provider_combo.setCurrentIndex(p_idx)
 
+        preset_key = config_manager.get("preset_prompt_key", "standard")
+        preset_idx = self.preset_combo.findData(preset_key)
+        if preset_idx >= 0:
+            self.preset_combo.setCurrentIndex(preset_idx)
+
+        self.custom_url_input.setText(config_manager.get("custom_api_base_url", "http://localhost:11434/v1"))
+        self.custom_model_input.setText(config_manager.get("custom_model_name", "llama3.2"))
+
         self.gemini_key_input.setText(config_manager.get("api_key_gemini", ""))
         self.grok_key_input.setText(config_manager.get("api_key_grok", ""))
         self.groq_key_input.setText(config_manager.get("api_key_groq", ""))
         self.openai_key_input.setText(config_manager.get("api_key_openai", ""))
-        self.prompt_edit.setText(config_manager.get("custom_prompt", ""))
+        self.custom_rules_edit.setText(config_manager.get("custom_user_rules", ""))
 
         self.check_selected_model_status(model)
         self.refresh_history_list()
 
     def save_ui_settings(self):
+        op_mode = "assistant" if self.mode_assistant_rb.isChecked() else "dictation"
+        config_manager.set("operation_mode", op_mode)
+
         backend_keys = ["cuda", "directml", "vulkan", "cpu", "cloud"]
         config_manager.set("stt_backend", backend_keys[self.backend_combo.currentIndex()])
         config_manager.set("model_size", self.model_combo.currentText())
         config_manager.set("language", self.lang_combo.currentData())
 
         config_manager.set("auto_paste", self.auto_paste_cb.isChecked())
+        config_manager.set("restore_clipboard", self.restore_clip_cb.isChecked())
         config_manager.set("play_sound", self.play_sound_cb.isChecked())
         config_manager.set("overlay_enabled", self.overlay_cb.isChecked())
 
         config_manager.set("hotkey", self.hotkey_input.text().strip())
         config_manager.set("hotkey_mode", self.hotkey_mode_combo.currentData())
-
         config_manager.set("audio_device_index", self.mic_combo.currentData())
 
         config_manager.set("ai_cleanup_enabled", self.ai_cleanup_cb.isChecked())
         config_manager.set("ai_cleanup_provider", self.ai_provider_combo.currentData())
+        config_manager.set("preset_prompt_key", self.preset_combo.currentData())
+        config_manager.set("custom_api_base_url", self.custom_url_input.text().strip())
+        config_manager.set("custom_model_name", self.custom_model_input.text().strip())
         config_manager.set("api_key_gemini", self.gemini_key_input.text().strip())
         config_manager.set("api_key_grok", self.grok_key_input.text().strip())
         config_manager.set("api_key_groq", self.groq_key_input.text().strip())
         config_manager.set("api_key_openai", self.openai_key_input.text().strip())
-        config_manager.set("custom_prompt", self.prompt_edit.toPlainText().strip())
+        config_manager.set("custom_user_rules", self.custom_rules_edit.toPlainText().strip())
 
         if self.app_controller:
             self.app_controller.reload_settings()
