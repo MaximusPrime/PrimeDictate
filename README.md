@@ -78,11 +78,31 @@ python run.py
 
 AMD acceleration uses the real whisper.cpp Vulkan backend; it does not label CPU inference as GPU processing. PrimeDictate ships with a pinned, locally built whisper.cpp `v1.9.2` Vulkan runtime and verifies its SHA-256 manifest before use. A current Vulkan-capable AMD driver is still required.
 
-```bash
+```text
 Motor & Davranış → AMD / Intel / NVIDIA — Vulkan
 ```
 
 PrimeDictate automatically discovers the bundled runtime, validates that the Vulkan backend is present, reports the detected GPU, and downloads the matching GGML model from the official whisper.cpp model repository. The custom runtime picker remains available only as an advanced override. RDNA 2 and newer AMD cards are the primary supported target; actual availability also depends on the installed Vulkan driver.
+
+---
+
+## 🔐 Privacy & Data Storage
+
+PrimeDictate uses the same per-user storage model in the installed and portable editions. The portable executable does not write settings, history, models, or credentials next to itself.
+
+```text
+%APPDATA%\PrimeDictate\
+├── config.json                    # Application settings; no API keys
+├── history.json                   # Optional local dictation history
+└── models\                        # Downloaded local Whisper/GGML models
+```
+
+- API keys are stored in **Windows Credential Manager**, not in `config.json` or plaintext files.
+- Local CPU, CUDA, and Vulkan engines process audio on the device without uploading it.
+- Audio is sent to Groq, OpenAI, or Gemini only when a cloud STT backend is selected, or when the user explicitly enables cloud fallback.
+- Dictation history can be disabled from the application settings.
+- Auto-paste can restore the previous clipboard contents after inserting the transcript.
+- Moving the portable executable does not remove the current Windows user's settings or downloaded models. Running it on another computer uses that computer's own `%APPDATA%` directory and Credential Manager.
 
 ---
 
