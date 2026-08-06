@@ -3,11 +3,12 @@ import os
 import winsound
 import threading
 import logging
-from PySide6.QtCore import QObject, Signal, Qt
-from PySide6.QtWidgets import QApplication
+from enum import Enum
+from PySide6.QtCore import QObject, Signal, QTimer, QLockFile
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
 
-from src.config import config_manager, get_resource_path
+from src.config import APP_DIR, config_manager, get_resource_path
 from src.audio.recorder import AudioRecorder
 from src.audio.vad import trim_silence, is_audio_meaningful
 from src.engine.engine_manager import engine_manager
@@ -26,6 +27,13 @@ logger = logging.getLogger("PrimeDictate.AppController")
 
 LOGO_PATH = get_resource_path("PrimeDictate-Logo.png")
 
+class AppState(Enum):
+    IDLE = "idle"
+    RECORDING = "recording"
+    TRANSCRIBING = "transcribing"
+    SUCCESS = "success"
+    ERROR = "error"
+
 class AppSignals(QObject):
     recording_started = Signal()
     recording_stopped = Signal()
@@ -37,12 +45,18 @@ class PrimeDictateApp:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
+        self.instance_lock = QLockFile(os.path.join(APP_DIR, "PrimeDictate.lock"))
+        if not self.instance_lock.tryLock(100):
+            QMessageBox.information(None, "PrimeDictate", "PrimeDictate zaten çalışıyor.")
+            raise SystemExit(0)
 
         if os.path.exists(LOGO_PATH):
             self.app.setWindowIcon(QIcon(LOGO_PATH))
 
         self.signals = AppSignals()
         self.recorder = AudioRecorder()
+        self.state = AppState.IDLE
+        self.target_window = None
         
         # UI Elements
         self.main_window = MainWindow(app_controller=self)
@@ -75,9 +89,9 @@ class PrimeDictateApp:
         self.hotkey_listener.start_listening()
 
     def toggle_dictation(self):
-        if not self.recorder.is_recording:
+        if self.state == AppState.IDLE:
             self.start_dictation()
-        else:
+        elif self.state == AppState.RECORDING:
             self.stop_dictation()
 
     def start_dictation_from_hotkey(self):
@@ -93,27 +107,36 @@ class PrimeDictateApp:
         self.signals.recording_stopped.emit()
 
     def _on_recording_started(self):
-        if self.recorder.is_recording:
+        if self.state != AppState.IDLE:
             return
+
+        self.target_window = paste_injector.capture_target_window()
 
         if config_manager.get("play_sound", True):
             threading.Thread(target=lambda: winsound.Beep(1000, 150), daemon=True).start()
 
-        self.recorder.start_recording(level_callback=lambda lvl: self.signals.audio_level.emit(lvl))
-        self.main_window.set_recording_state(True)
+        try:
+            self.recorder.start_recording(level_callback=lambda lvl: self.signals.audio_level.emit(lvl))
+        except Exception as exc:
+            logger.error("Could not start recording: %s", exc)
+            self._set_state(AppState.ERROR, "Mikrofon başlatılamadı")
+            QTimer.singleShot(1800, lambda: self._set_state(AppState.IDLE, "Hazır"))
+            return
+
+        self._set_state(AppState.RECORDING, "Dinleniyor")
 
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status("Dinleniyor...", "#38bdf8")
             self.overlay.show()
 
     def _on_recording_stopped(self):
-        if not self.recorder.is_recording:
+        if self.state != AppState.RECORDING or not self.recorder.is_recording:
             return
 
         if config_manager.get("play_sound", True):
             threading.Thread(target=lambda: winsound.Beep(800, 150), daemon=True).start()
 
-        self.main_window.set_recording_state(False)
+        self._set_state(AppState.TRANSCRIBING, "Metne çevriliyor")
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status("Metne Çevriliyor...", "#f59e0b")
 
@@ -139,16 +162,22 @@ class PrimeDictateApp:
             self.signals.status_changed.emit(f"Hata: {e}", "#ef4444")
 
     def _on_transcription_complete(self, text: str):
-        logger.info(f"Final transcription: '{text}'")
+        logger.info("Final transcription ready (%d characters).", len(text))
 
         # Inject into active focused window via clipboard Ctrl+V
-        paste_injector.paste_text(text)
+        pasted = paste_injector.paste_text(
+            text,
+            restore_clipboard=config_manager.get("restore_clipboard", True),
+            target_hwnd=self.target_window,
+        )
 
         # Add to history
         self.main_window.add_history_entry(text)
+        result_message = "Metin aktarıldı" if pasted else "Metin panoya kopyalandı"
+        self._set_state(AppState.SUCCESS, result_message)
 
         if config_manager.get("overlay_enabled", True):
-            self.overlay.set_status("Aktarıldı! ✓", "#10b981")
+            self.overlay.set_status(result_message, "#10b981")
             QTimer.singleShot(1500, self.overlay.hide)
 
     def _on_audio_level(self, level: float):
@@ -157,16 +186,28 @@ class PrimeDictateApp:
         self.main_window.mic_progress.setValue(int(level * 100))
 
     def _on_status_changed(self, msg: str, color_hex: str):
+        self._set_state(AppState.ERROR, msg)
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status(msg, color_hex)
             QTimer.singleShot(1800, self.overlay.hide)
+        QTimer.singleShot(1800, lambda: self._set_state(AppState.IDLE, "Hazır"))
+
+    def _set_state(self, state: AppState, message: str):
+        self.state = state
+        self.hotkey_listener.sync_recording_state(state == AppState.RECORDING)
+        self.main_window.set_app_state(state.value, message)
+        if state == AppState.SUCCESS:
+            QTimer.singleShot(1500, lambda: self._set_state(AppState.IDLE, "Hazır"))
 
     def run(self):
         self.main_window.show()
         sys.exit(self.app.exec())
 
     def quit(self):
+        if self.recorder.is_recording:
+            self.recorder.stop_recording()
         self.hotkey_listener.stop_listening()
+        self.instance_lock.unlock()
         self.app.quit()
 
 if __name__ == "__main__":

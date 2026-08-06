@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['c:\\Users\\MAXIMUS\\PROJECTS\\PrimeDictate-Project\\run.py'],
+    ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[('c:\\Users\\MAXIMUS\\PROJECTS\\PrimeDictate-Project\\PrimeDictate-Logo.png', '.')],
+    datas=[('PrimeDictate-Logo.png', '.'), ('runtime', 'runtime')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['c:\\Users\\MAXIMUS\\PROJECTS\\PrimeDictate-Project\\PrimeDictate-Logo.png'],
+    icon=['PrimeDictate-Logo.ico'],
 )

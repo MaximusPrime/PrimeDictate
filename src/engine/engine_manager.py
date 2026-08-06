@@ -2,7 +2,7 @@ import logging
 import numpy as np
 from src.config import config_manager
 from src.engine.stt_cuda import CUDASTTEngine
-from src.engine.stt_directml import DirectMLSTTEngine
+from src.engine.stt_cpu import CPUSTTEngine
 from src.engine.stt_vulkan import VulkanSTTEngine
 from src.engine.stt_cloud import CloudSTTEngine
 from src.engine.ai_cleanup import ai_cleanup_engine
@@ -18,21 +18,19 @@ class EngineManager:
         if backend not in self.engines:
             if backend == "cuda":
                 self.engines[backend] = CUDASTTEngine()
-            elif backend == "directml":
-                self.engines[backend] = DirectMLSTTEngine()
             elif backend == "vulkan":
                 self.engines[backend] = VulkanSTTEngine()
             elif backend == "cloud":
                 self.engines[backend] = CloudSTTEngine()
             else:  # cpu
-                self.engines[backend] = DirectMLSTTEngine()  # DirectML engine has CPU fallback built-in
+                self.engines[backend] = CPUSTTEngine()
         return self.engines[backend]
 
     def process_audio(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
         if len(audio) == 0:
             return ""
 
-        backend = config_manager.get("stt_backend", "directml")
+        backend = config_manager.get("stt_backend", "cpu")
         model_size = config_manager.get("model_size", "base")
         language = config_manager.get("language", "tr")
 
@@ -53,10 +51,9 @@ class EngineManager:
             return final_text
         except Exception as e:
             logger.error(f"Error in EngineManager processing: {e}")
-            # Try cloud or fallback if main engine failed
-            if backend != "cloud":
+            if backend != "cloud" and config_manager.get("allow_cloud_fallback", False):
                 try:
-                    logger.info("Attempting cloud fallback...")
+                    logger.info("Attempting user-approved cloud fallback...")
                     cloud_engine = self.get_engine("cloud")
                     raw_text = cloud_engine.transcribe(audio, sample_rate=sample_rate, language=language)
                     return ai_cleanup_engine.clean_text(raw_text)

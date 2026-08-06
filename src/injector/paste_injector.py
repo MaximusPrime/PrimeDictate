@@ -1,6 +1,7 @@
 import time
 import threading
 import logging
+import os
 import win32gui
 import win32process
 import pyperclip
@@ -31,13 +32,26 @@ class PasteInjector:
         except Exception:
             return "Bilinmeyen Pencere", 0
 
-    def paste_text(self, text: str, restore_clipboard: bool = False):
+    @staticmethod
+    def capture_target_window():
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            if hwnd and win32gui.IsWindow(hwnd):
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if pid == os.getpid():
+                    return None
+                return hwnd
+        except Exception:
+            pass
+        return None
+
+    def paste_text(self, text: str, restore_clipboard: bool = False, target_hwnd=None) -> bool:
         if not text or not text.strip():
-            return
+            return False
 
         text = text.strip()
         win_title, pid = self._get_active_window_info()
-        logger.info(f"Injecting text into active window '{win_title}' (PID {pid}): '{text}'")
+        logger.info("Injecting %d characters into window '%s' (PID %s).", len(text), win_title, pid)
 
         try:
             # Backup previous clipboard
@@ -52,23 +66,35 @@ class PasteInjector:
             success = self._safe_copy_to_clipboard(text)
             if not success:
                 logger.error("Failed to copy transcribed text to clipboard after retries.")
-                return
+                return False
 
             # Trigger paste into focused app
             auto_paste = config_manager.get("auto_paste", True)
-            if auto_paste:
-                time.sleep(0.08)  # slight delay for Windows focus & clipboard sync
-                keyboard.send("ctrl+v")
-                logger.info("Sent Ctrl+V key combination.")
+            pasted = False
+            if auto_paste and target_hwnd and win32gui.IsWindow(target_hwnd):
+                try:
+                    win32gui.SetForegroundWindow(target_hwnd)
+                    time.sleep(0.05)
+                except Exception:
+                    logger.warning("Could not restore the original target window focus.")
+                if win32gui.GetForegroundWindow() != target_hwnd:
+                    logger.warning("Paste was skipped because the target window could not be focused safely.")
+                else:
+                    time.sleep(0.08)  # slight delay for Windows focus & clipboard sync
+                    keyboard.send("ctrl+v")
+                    pasted = True
+                    logger.info("Sent Ctrl+V key combination.")
 
             # Restore original clipboard asynchronously if requested
-            if restore_clipboard and previous_clip is not None:
+            if pasted and restore_clipboard and previous_clip is not None:
                 def restore():
                     time.sleep(0.6)
                     self._safe_copy_to_clipboard(previous_clip)
                 threading.Thread(target=restore, daemon=True).start()
+            return pasted
 
         except Exception as e:
             logger.error(f"Error in PasteInjector: {e}")
+            return False
 
 paste_injector = PasteInjector()

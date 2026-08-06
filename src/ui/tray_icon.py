@@ -23,16 +23,16 @@ class SystemTrayManager:
     def _setup_menu(self):
         menu = QMenu()
 
-        show_action = menu.addAction("📌 Kontrol Paneli")
+        show_action = menu.addAction("Kontrol Paneli")
         show_action.triggered.connect(self.main_window.show_and_raise)
 
-        toggle_action = menu.addAction("🎙️ Dikteyi Başlat / Durdur")
+        toggle_action = menu.addAction("Dikteyi Başlat / Durdur")
         if self.toggle_callback:
             toggle_action.triggered.connect(self.toggle_callback)
 
         menu.addSeparator()
 
-        exit_action = menu.addAction("❌ Çıkış")
+        exit_action = menu.addAction("Çıkış")
         exit_action.triggered.connect(self.main_window.quit_app)
 
         self.tray.setContextMenu(menu)

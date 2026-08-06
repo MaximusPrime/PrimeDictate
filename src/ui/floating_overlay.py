@@ -1,8 +1,8 @@
 import os
 import math
-from PySide6.QtCore import Qt, QTimer, QPoint, Signal
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QPixmap
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QPainter, QColor, QBrush, QPixmap
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel
 from src.config import config_manager, get_resource_path
 
 class WaveVisualizer(QWidget):
@@ -85,7 +85,7 @@ class FloatingOverlay(QWidget):
             pix = QPixmap(logo_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.logo_label.setPixmap(pix)
         else:
-            self.logo_label.setText("🎙️")
+            self.logo_label.setText("PD")
 
         # Visualizer
         self.visualizer = WaveVisualizer()

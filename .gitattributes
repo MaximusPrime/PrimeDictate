@@ -1,0 +1,2 @@
+runtime/whisper-vulkan/*.dll filter=lfs diff=lfs merge=lfs -text
+runtime/whisper-vulkan/*.exe filter=lfs diff=lfs merge=lfs -text

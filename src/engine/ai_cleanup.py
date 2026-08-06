@@ -1,7 +1,7 @@
 import re
 import logging
 import requests
-from src.config import config_manager, PRESET_PROMPTS
+from src.config import config_manager
 
 logger = logging.getLogger("PrimeDictate.AICleanup")
 
@@ -9,6 +9,7 @@ FILLER_PATTERNS = [
     (r'(?i)\b(e{2,}|ı{2,}|a{2,})\b', ''),
     (r'(?i)\b(h+m+)+(\b|\s)', ''),
     (r'(?i)\b(ı+h+m+)+(\b|\s)', ''),
+    (r'(?i)^\s*(?:(?:yani|şey|işte|hani|falan|böyle|ya)\b[,\s]*)+', ''),
     (r'(?i)^\s*(yani|şey|ee|ıı)\s*,\s*', ''),
     (r'(?i)\s+,\s*(yani|şey|ee|ıı)\s*,', ','),
 ]
@@ -45,28 +46,32 @@ class AICleanupEngine:
         elif provider == "groq":
             api_key = config_manager.get("api_key_groq", "")
             if api_key:
-                result = self._clean_with_openai_compatible(text, "https://api.groq.com/openai/v1", api_key, "llama-3.3-70b-versatile", prompt)
+                model = config_manager.get("ai_model_groq", "llama-3.3-70b-versatile")
+                result = self._clean_with_openai_compatible(text, "https://api.groq.com/openai/v1", api_key, model, prompt)
                 if result:
                     return result
 
         elif provider == "openai":
             api_key = config_manager.get("api_key_openai", "")
             if api_key:
-                result = self._clean_with_openai_compatible(text, "https://api.openai.com/v1", api_key, "gpt-4o-mini", prompt)
+                model = config_manager.get("ai_model_openai", "gpt-4o-mini")
+                result = self._clean_with_openai_compatible(text, "https://api.openai.com/v1", api_key, model, prompt)
                 if result:
                     return result
 
         elif provider == "gemini":
             api_key = config_manager.get("api_key_gemini", "")
             if api_key:
-                result = self._clean_with_gemini(text, api_key, prompt)
+                model = config_manager.get("ai_model_gemini", "gemini-3.6-flash")
+                result = self._clean_with_gemini(text, api_key, model, prompt)
                 if result:
                     return result
 
         elif provider == "grok":
             api_key = config_manager.get("api_key_grok", "")
             if api_key:
-                result = self._clean_with_openai_compatible(text, "https://api.x.ai/v1", api_key, "grok-beta", prompt)
+                model = config_manager.get("ai_model_grok", "grok-beta")
+                result = self._clean_with_openai_compatible(text, "https://api.x.ai/v1", api_key, model, prompt)
                 if result:
                     return result
 
@@ -87,7 +92,7 @@ class AICleanupEngine:
         if cleaned and not cleaned[-1] in ['.', '!', '?', ':', ';']:
             cleaned += '.'
 
-        logger.info(f"Rule-based cleaned: '{text}' -> '{cleaned}'")
+        logger.info("Rule-based cleanup completed (%d -> %d characters).", len(text), len(cleaned))
         return cleaned
 
     def _clean_with_openai_compatible(self, text: str, base_url: str, api_key: str, model_name: str, prompt: str) -> str:
@@ -110,18 +115,18 @@ class AICleanupEngine:
                 result = resp.json()['choices'][0]['message']['content'].strip()
                 if result.startswith('"') and result.endswith('"'):
                     result = result[1:-1]
-                logger.info(f"LLM ({model_name}) cleaned: '{text}' -> '{result}'")
+                logger.info("LLM cleanup completed with model '%s' (%d characters).", model_name, len(result))
                 return result
             else:
-                logger.warning(f"LLM API response {resp.status_code}: {resp.text}")
+                logger.warning("LLM API returned HTTP %s.", resp.status_code)
         except Exception as e:
             logger.error(f"LLM API error ({base_url}): {e}")
         return None
 
-    def _clean_with_gemini(self, text: str, api_key: str, prompt: str) -> str:
+    def _clean_with_gemini(self, text: str, api_key: str, model_name: str, prompt: str) -> str:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-            headers = {"Content-Type": "application/json"}
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+            headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
             payload = {
                 "contents": [{
                     "role": "user",
@@ -134,7 +139,7 @@ class AICleanupEngine:
                 result = data['candidates'][0]['content']['parts'][0]['text'].strip()
                 if result.startswith('"') and result.endswith('"'):
                     result = result[1:-1]
-                logger.info(f"Gemini cleaned: '{text}' -> '{result}'")
+                logger.info("Gemini cleanup completed (%d characters).", len(result))
                 return result
         except Exception as e:
             logger.error(f"Gemini API error: {e}")

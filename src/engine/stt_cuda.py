@@ -26,9 +26,11 @@ class CUDASTTEngine(BaseSTTEngine):
                 self.model_name = model_name
                 logger.info(f"Successfully loaded '{model_name}' on NVIDIA CUDA int8.")
             except Exception as e2:
-                logger.warning(f"CUDA int8 failed ({e2}), falling back to CPU int8...")
-                self.model = WhisperModel(model_name, device="cpu", compute_type="int8")
-                self.model_name = model_name
+                self.model = None
+                self.model_name = None
+                raise RuntimeError(
+                    "CUDA modeli yüklenemedi. NVIDIA sürücülerini kontrol edin veya Yerel CPU motorunu seçin."
+                ) from e2
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "tr") -> str:
         if len(audio) == 0:

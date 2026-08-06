@@ -1,7 +1,6 @@
 import numpy as np
 import sounddevice as sd
 from scipy.signal import resample_poly
-import queue
 import logging
 
 logger = logging.getLogger("PrimeDictate.AudioRecorder")
@@ -10,7 +9,6 @@ TARGET_SAMPLE_RATE = 16000
 
 class AudioRecorder:
     def __init__(self):
-        self.audio_queue = queue.Queue()
         self.is_recording = False
         self.stream = None
         self.frames = []
