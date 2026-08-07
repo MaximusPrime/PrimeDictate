@@ -212,6 +212,12 @@ QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QListWidget:focus {
     border: 1px solid #b99b62;
 }
 QComboBox::drop-down { border: none; width: 28px; }
+QComboBox::down-arrow {
+    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23b99b62' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+}
 QComboBox QAbstractItemView {
     background-color: #141a21;
     border: 1px solid #3a444f;
