@@ -5,10 +5,19 @@ from src.config import config_manager
 
 logger = logging.getLogger("PrimeDictate.AICleanup")
 
+
+def _log_provider_failure(provider: str, error: Exception):
+    status_code = getattr(error, "status_code", None)
+    details = [f"error_type={type(error).__name__}"]
+    if status_code is not None:
+        details.append(f"http_status={status_code}")
+    logger.error("%s text-processing request failed (%s).", provider, ", ".join(details))
+
 FILLER_PATTERNS = [
     (r'(?i)\b(e{2,}|ı{2,}|a{2,})\b', ''),
     (r'(?i)\b(h+m+)+(\b|\s)', ''),
     (r'(?i)\b(ı+h+m+)+(\b|\s)', ''),
+    (r'(?i)^\s*(?:(?:u+h+|u+m+|e+r+m+)\b[,\s]*)+', ''),
     (r'(?i)^\s*(?:(?:yani|şey|işte|hani|falan|böyle|ya)\b[,\s]*)+', ''),
     (r'(?i)^\s*(yani|şey|ee|ıı)\s*,\s*', ''),
     (r'(?i)\s+,\s*(yani|şey|ee|ıı)\s*,', ','),
@@ -24,16 +33,12 @@ class AICleanupEngine:
 
         text = raw_text.strip()
         enabled = config_manager.get("ai_cleanup_enabled", True)
-        op_mode = config_manager.get("operation_mode", "dictation")
 
-        if not enabled and op_mode != "assistant":
+        if not enabled:
             return text
 
         provider = config_manager.get("ai_cleanup_provider", "rule_based")
         prompt = config_manager.get_effective_prompt()
-
-        if op_mode == "assistant":
-            prompt = "Sen güçlü bir Yapay Zeka Komut Asistanısın. Kullanıcı mikrofona bir komut veya soru verdi. Kullanıcının söylediği görevi doğrudan yerine getir ve cevabı açık, anlaşılır metin olarak yaz."
 
         # Provider Dispatching
         if provider == "custom_ollama":
@@ -118,9 +123,11 @@ class AICleanupEngine:
                 logger.info("LLM cleanup completed with model '%s' (%d characters).", model_name, len(result))
                 return result
             else:
-                logger.warning("LLM API returned HTTP %s.", resp.status_code)
+                request_id = resp.headers.get("x-request-id") or resp.headers.get("request-id")
+                suffix = f" request_id={request_id}" if request_id else ""
+                logger.warning("LLM text-processing API returned HTTP %s.%s", resp.status_code, suffix)
         except Exception as e:
-            logger.error(f"LLM API error ({base_url}): {e}")
+            _log_provider_failure("OpenAI-compatible", e)
         return None
 
     def _clean_with_gemini(self, text: str, api_key: str, model_name: str, prompt: str) -> str:
@@ -141,8 +148,11 @@ class AICleanupEngine:
                     result = result[1:-1]
                 logger.info("Gemini cleanup completed (%d characters).", len(result))
                 return result
+            request_id = resp.headers.get("x-request-id") or resp.headers.get("request-id")
+            suffix = f" request_id={request_id}" if request_id else ""
+            logger.warning("Gemini text-processing API returned HTTP %s.%s", resp.status_code, suffix)
         except Exception as e:
-            logger.error(f"Gemini API error: {e}")
+            _log_provider_failure("Gemini", e)
         return None
 
 ai_cleanup_engine = AICleanupEngine()

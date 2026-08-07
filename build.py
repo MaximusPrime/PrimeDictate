@@ -1,11 +1,63 @@
 import os
-import sys
 import shutil
 import subprocess
+import sys
+import tempfile
+
+from src.metadata import (
+    APP_NAME,
+    EMAIL,
+    PUBLISHER,
+    REPOSITORY,
+    STUDIO,
+    VERSION,
+    WEBSITE,
+)
+
+
+def write_version_file(path, executable_name):
+    version_parts = [int(part) for part in VERSION.split(".")]
+    if len(version_parts) > 4:
+        raise ValueError(f"VERSION must contain at most four numeric parts: {VERSION}")
+    version_tuple = tuple(version_parts + [0] * (4 - len(version_parts)))
+    version_text = ", ".join(str(part) for part in version_tuple)
+    comments = f"Studio: {STUDIO}; Website: {WEBSITE}; Email: {EMAIL}; Repository: {REPOSITORY}"
+    contents = f"""VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({version_text}),
+    prodvers=({version_text}),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904B0',
+        [StringStruct('CompanyName', {PUBLISHER!r}),
+         StringStruct('FileDescription', {APP_NAME!r}),
+         StringStruct('FileVersion', {VERSION!r}),
+         StringStruct('InternalName', {APP_NAME!r}),
+         StringStruct('OriginalFilename', {executable_name!r}),
+         StringStruct('ProductName', {APP_NAME!r}),
+         StringStruct('ProductVersion', {VERSION!r}),
+         StringStruct('Comments', {comments!r})]
+      )
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+"""
+    with open(path, "w", encoding="utf-8") as version_file:
+        version_file.write(contents)
+
 
 def build():
     print("==========================================")
-    print(" Building PrimeDictate Executables ")
+    print(f" Building {APP_NAME} {VERSION} Executables ")
     print("==========================================")
 
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +70,14 @@ def build():
     icon_arg = os.path.basename(icon_path)
     run_arg = os.path.basename(run_py)
     runtime_arg = "runtime"
+    studio_logo_arg = os.path.join("assets", "maximus-prime-software.png")
+    app_icon_arg = os.path.join("assets", "PrimeDictate-AppIcon.png")
+
+    version_dir = tempfile.TemporaryDirectory(prefix="primedictate-version-")
+    portable_version_file = os.path.join(version_dir.name, "portable-version.txt")
+    directory_version_file = os.path.join(version_dir.name, "directory-version.txt")
+    write_version_file(portable_version_file, f"{APP_NAME}-Portable.exe")
+    write_version_file(directory_version_file, f"{APP_NAME}.exe")
 
     # 1. Build Portable (.exe)
     print("\n[1/3] Building Portable Edition (PrimeDictate-Portable.exe)...")
@@ -28,8 +88,11 @@ def build():
         "--onefile",
         f"--icon={icon_arg}",
         f"--add-data={logo_arg};.",
+        f"--add-data={studio_logo_arg};assets",
+        f"--add-data={app_icon_arg};assets",
         f"--add-data={runtime_arg};runtime",
-        "--name=PrimeDictate-Portable",
+        f"--version-file={portable_version_file}",
+        f"--name={APP_NAME}-Portable",
         "--clean",
         run_arg
     ]
@@ -48,8 +111,11 @@ def build():
         "--onedir",
         f"--icon={icon_arg}",
         f"--add-data={logo_arg};.",
+        f"--add-data={studio_logo_arg};assets",
+        f"--add-data={app_icon_arg};assets",
         f"--add-data={runtime_arg};runtime",
-        "--name=PrimeDictate",
+        f"--version-file={directory_version_file}",
+        f"--name={APP_NAME}",
         run_arg
     ]
     res2 = subprocess.run(cmd_dir, cwd=project_root)

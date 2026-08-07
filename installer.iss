@@ -1,7 +1,8 @@
 #define MyAppName "PrimeDictate"
-#define MyAppVersion "1.0"
-#define MyAppPublisher "MaximusPrime"
-#define MyAppURL "https://github.com/MaximusPrime/PrimeDictate"
+#define MyAppVersion "1.0.0"
+#define MyAppPublisher "Maximus Prime Software"
+#define MyAppURL "https://maximusprimesoftware.pages.dev/"
+#define MyAppRepo "https://github.com/MaximusPrime/PrimeDictate"
 #define MyAppExeName "PrimeDictate.exe"
 
 [Setup]
@@ -10,8 +11,8 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
-AppUpdatesURL={#MyAppURL}
+AppSupportURL={#MyAppRepo}
+AppUpdatesURL={#MyAppRepo}
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 OutputBaseFilename=PrimeDictate-Setup
@@ -22,6 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 
 [Languages]
+Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
 
 [Tasks]

@@ -1,2 +1,5 @@
-# PrimeDictate Package
-__version__ = "1.0.0"
+"""PrimeDictate package."""
+
+from .metadata import VERSION
+
+__version__ = VERSION

@@ -2,6 +2,7 @@ import os
 import threading
 import logging
 import requests
+from src.i18n import t
 from PySide6.QtCore import QObject, Signal
 from src.config import APP_DIR
 
@@ -16,6 +17,8 @@ VULKAN_MODEL_FILES = {
 }
 VULKAN_MODEL_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 VULKAN_MODEL_DIR = os.path.join(APP_DIR, "models", "whisper.cpp")
+FASTER_WHISPER_MODEL_DIR = os.path.join(APP_DIR, "models", "faster-whisper")
+SUPPORTED_MODEL_NAMES = frozenset(VULKAN_MODEL_FILES)
 
 class ModelManager(QObject):
     progress = Signal(int, str)  # percentage (0-100), status message
@@ -26,12 +29,12 @@ class ModelManager(QObject):
         self._is_downloading = False
 
     def get_model_path(self, model_name: str, backend: str):
+        if model_name not in SUPPORTED_MODEL_NAMES:
+            raise ValueError(f"Desteklenmeyen model: {model_name}")
         if backend == "vulkan":
             filename = VULKAN_MODEL_FILES.get(model_name)
-            if not filename:
-                raise ValueError(f"Vulkan için desteklenmeyen model: {model_name}")
             return os.path.join(VULKAN_MODEL_DIR, filename)
-        return ""
+        return os.path.join(FASTER_WHISPER_MODEL_DIR, model_name)
 
     def is_model_downloaded(self, model_name: str, backend: str = "cpu") -> bool:
         if backend == "vulkan":
@@ -40,10 +43,10 @@ class ModelManager(QObject):
             except ValueError:
                 return False
         try:
-            from faster_whisper.utils import download_model
-            model_path = download_model(model_name, local_files_only=True)
-            return os.path.isdir(model_path)
-        except Exception:
+            model_path = self.get_model_path(model_name, backend)
+            required_files = ("config.json", "model.bin", "tokenizer.json")
+            return all(os.path.isfile(os.path.join(model_path, filename)) for filename in required_files)
+        except (OSError, ValueError):
             return False
 
     def download_model_async(self, model_name: str, backend: str = "cpu"):
@@ -54,21 +57,23 @@ class ModelManager(QObject):
 
     def _download_worker(self, model_name: str, backend: str):
         logger.info("Starting download for model '%s' (%s).", model_name, backend)
-        self.progress.emit(-1, f"Model dosyası indiriliyor: {model_name}...")
+        self.progress.emit(-1, f"{t('Model dosyası indiriliyor')}: {model_name}...")
 
         try:
             if backend == "vulkan":
                 self._download_vulkan_model(model_name)
             else:
                 from faster_whisper.utils import download_model
-                self.progress.emit(-1, f"HuggingFace sunucusuna bağlanılıyor ({model_name})...")
-                download_model(model_name)
+                self.progress.emit(-1, f"{t('HuggingFace sunucusuna bağlanılıyor')} ({model_name})...")
+                model_path = self.get_model_path(model_name, backend)
+                os.makedirs(model_path, exist_ok=True)
+                download_model(model_name, output_dir=model_path)
             
-            self.progress.emit(100, f"Model '{model_name}' başarıyla yüklendi ve hazır.")
+            self.progress.emit(100, t("Model '{model}' başarıyla yüklendi ve hazır.").format(model=model_name))
             self.download_finished.emit(backend, model_name, True, "")
         except Exception as e:
             logger.error(f"Failed to download model '{model_name}': {e}")
-            self.progress.emit(0, f"İndirme hatası: {e}")
+            self.progress.emit(0, f"{t('İndirme hatası')}: {e}")
             self.download_finished.emit(backend, model_name, False, str(e))
         finally:
             self._is_downloading = False
@@ -92,7 +97,7 @@ class ModelManager(QObject):
                         downloaded += len(block)
                         if total_size:
                             percent = min(99, int(downloaded * 100 / total_size))
-                            self.progress.emit(percent, f"Vulkan modeli indiriliyor: %{percent}")
+                            self.progress.emit(percent, f"{t('Vulkan modeli indiriliyor')}: %{percent}")
             os.replace(partial_path, target_path)
         except Exception:
             if os.path.exists(partial_path):

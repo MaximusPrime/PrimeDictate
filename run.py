@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
 
 from src.config import APP_DIR, config_manager, get_resource_path
+from src.i18n import set_language, t
 from src.audio.recorder import AudioRecorder
 from src.audio.vad import trim_silence, is_audio_meaningful
 from src.engine.engine_manager import engine_manager
@@ -25,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PrimeDictate.AppController")
 
-LOGO_PATH = get_resource_path("PrimeDictate-Logo.png")
+LOGO_PATH = get_resource_path(os.path.join("assets", "PrimeDictate-AppIcon.png"))
 
 class AppState(Enum):
     IDLE = "idle"
@@ -43,11 +44,12 @@ class AppSignals(QObject):
 
 class PrimeDictateApp:
     def __init__(self):
+        set_language(config_manager.get("ui_language", "tr"))
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
         self.instance_lock = QLockFile(os.path.join(APP_DIR, "PrimeDictate.lock"))
         if not self.instance_lock.tryLock(100):
-            QMessageBox.information(None, "PrimeDictate", "PrimeDictate zaten çalışıyor.")
+            QMessageBox.information(None, "PrimeDictate", t("PrimeDictate zaten çalışıyor."))
             raise SystemExit(0)
 
         if os.path.exists(LOGO_PATH):
@@ -60,7 +62,7 @@ class PrimeDictateApp:
         
         # UI Elements
         self.main_window = MainWindow(app_controller=self)
-        self.overlay = FloatingOverlay()
+        self.overlay = FloatingOverlay(stop_callback=self.stop_dictation)
         self.tray = SystemTrayManager(main_window=self.main_window, toggle_callback=self.toggle_dictation)
 
         # Hotkey Listener
@@ -87,6 +89,8 @@ class PrimeDictateApp:
 
         # Update hotkey
         self.hotkey_listener.start_listening()
+        if hasattr(self, "tray"):
+            self.tray.retranslate()
 
     def toggle_dictation(self):
         if self.state == AppState.IDLE:
@@ -109,6 +113,11 @@ class PrimeDictateApp:
     def _on_recording_started(self):
         if self.state != AppState.IDLE:
             return
+        if not config_manager.get("setup_completed", False):
+            self.main_window.show_and_raise()
+            self.main_window._set_page(1)
+            self._set_state(AppState.IDLE, "Kurulum gerekli")
+            return
 
         self.target_window = paste_injector.capture_target_window()
 
@@ -126,6 +135,7 @@ class PrimeDictateApp:
         self._set_state(AppState.RECORDING, "Dinleniyor")
 
         if config_manager.get("overlay_enabled", True):
+            self.overlay.set_recording_active(True)
             self.overlay.set_status("Dinleniyor...", "#38bdf8")
             self.overlay.show()
 
@@ -138,6 +148,7 @@ class PrimeDictateApp:
 
         self._set_state(AppState.TRANSCRIBING, "Metne çevriliyor")
         if config_manager.get("overlay_enabled", True):
+            self.overlay.set_recording_active(False)
             self.overlay.set_status("Metne Çevriliyor...", "#f59e0b")
 
         # Process recorded audio in background thread
@@ -156,10 +167,11 @@ class PrimeDictateApp:
             if text:
                 self.signals.transcription_complete.emit(text)
             else:
-                self.signals.status_changed.emit("Anlaşılamadı veya Model Yüklenemedi", "#ef4444")
+                error_message = engine_manager.last_error or "Anlaşılamadı veya Model Yüklenemedi"
+                self.signals.status_changed.emit(error_message, "#ef4444")
         except Exception as e:
             logger.error(f"Error processing dictation: {e}")
-            self.signals.status_changed.emit(f"Hata: {e}", "#ef4444")
+            self.signals.status_changed.emit(f"{t('Hata')}: {e}", "#ef4444")
 
     def _on_transcription_complete(self, text: str):
         logger.info("Final transcription ready (%d characters).", len(text))
@@ -173,6 +185,7 @@ class PrimeDictateApp:
 
         # Add to history
         self.main_window.add_history_entry(text)
+        self.main_window.update_transcription_metadata(engine_manager.last_transcription_info)
         result_message = "Metin aktarıldı" if pasted else "Metin panoya kopyalandı"
         self._set_state(AppState.SUCCESS, result_message)
 
