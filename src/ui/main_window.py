@@ -527,7 +527,6 @@ class MainWindow(QMainWindow):
         cloud_model_label.setObjectName("fieldLabel")
         cloud_model_row.addWidget(cloud_model_label)
         self.cloud_stt_model_combo = QComboBox()
-        self.cloud_stt_model_combo.setEditable(True)
         cloud_model_row.addWidget(self.cloud_stt_model_combo, 1)
         cloud_layout.addLayout(cloud_model_row)
         self.cloud_provider_note = QLabel()
@@ -677,7 +676,6 @@ class MainWindow(QMainWindow):
         ai_model_label.setObjectName("fieldLabel")
         ai_model_layout.addWidget(ai_model_label)
         self.ai_model_combo = QComboBox()
-        self.ai_model_combo.setEditable(True)
         ai_model_layout.addWidget(self.ai_model_combo, 1)
         processing_layout.addWidget(self.ai_model_widget)
 

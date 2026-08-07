@@ -35,6 +35,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    version='C:\\Users\\MAXIMUS\\AppData\\Local\\Temp\\primedictate-version-sp30tokm\\portable-version.txt',
+    version='C:\\Users\\MAXIMUS\\AppData\\Local\\Temp\\primedictate-version-9esyz0n8\\portable-version.txt',
     icon=['PrimeDictate-Logo.ico'],
 )
