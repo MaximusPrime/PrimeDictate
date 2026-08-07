@@ -5,11 +5,16 @@ from PySide6.QtCore import Qt, Signal, QObject, QUrl
 from PySide6.QtGui import QIcon, QPixmap, QDesktopServices
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QGroupBox, QComboBox, QLineEdit, QPushButton, QCheckBox, QTextEdit,
+    QGroupBox, QComboBox as QtQComboBox, QLineEdit, QPushButton, QCheckBox, QTextEdit,
     QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QApplication,
     QFileDialog, QButtonGroup, QStackedWidget, QScrollArea,
     QFrame, QGridLayout, QSystemTrayIcon
 )
+
+class QComboBox(QtQComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
 from src import __version__
 from src.config import STT_LANGUAGES, STT_LANGUAGE_NAMES_TR, config_manager, get_resource_path
 from src.i18n import get_language, set_language, t
@@ -51,7 +56,7 @@ class MainWindow(QMainWindow):
     def __init__(self, app_controller=None):
         super().__init__()
         self.app_controller = app_controller
-        set_language(config_manager.get("ui_language", "tr"))
+        set_language(config_manager.get("ui_language", "en"))
         self.setWindowTitle(f"PrimeDictate - {t('Yapay Zeka Destekli Sesli Yazma')}")
         self.resize(1180, 760)
         self.setMinimumSize(960, 640)
@@ -116,6 +121,17 @@ class MainWindow(QMainWindow):
             side_layout.addWidget(button)
         self.nav_buttons[0].setChecked(True)
         side_layout.addStretch()
+
+        self.quick_lang_combo = QComboBox()
+        self.quick_lang_combo.setToolTip(t("Arayüz dili"))
+        self.quick_lang_combo.addItem("🌐 English", "en")
+        self.quick_lang_combo.addItem("🌐 Türkçe", "tr")
+        current_ui_lang = get_language()
+        q_idx = self.quick_lang_combo.findData(current_ui_lang)
+        self.quick_lang_combo.setCurrentIndex(max(0, q_idx))
+        self.quick_lang_combo.currentIndexChanged.connect(self._on_quick_lang_changed)
+        side_layout.addWidget(self.quick_lang_combo)
+
         shell_layout.addWidget(sidebar)
 
         content = QWidget()
@@ -153,6 +169,7 @@ class MainWindow(QMainWindow):
         self.dictate_btn.setMinimumWidth(150)
         self.dictate_btn.clicked.connect(self.on_dictate_btn_clicked)
         actions_layout.addWidget(self.dictate_btn)
+
         header_layout.addWidget(header_actions)
         content_layout.addLayout(header_layout)
 
@@ -193,8 +210,28 @@ class MainWindow(QMainWindow):
         self.page_subtitle.setText(t(subtitle))
         self.footer_widget.setVisible(index != len(self.PAGE_DEFINITIONS) - 1)
 
+    def _on_quick_lang_changed(self, index: int):
+        lang = self.quick_lang_combo.itemData(index)
+        if lang and lang != get_language():
+            set_language(lang)
+            config_manager.set("ui_language", lang)
+            config_manager.save_config()
+            if hasattr(self, "ui_language_combo"):
+                idx = self.ui_language_combo.findData(lang)
+                if idx >= 0:
+                    self.ui_language_combo.blockSignals(True)
+                    self.ui_language_combo.setCurrentIndex(idx)
+                    self.ui_language_combo.blockSignals(False)
+            self._apply_ui_language()
+
     def _apply_ui_language(self):
         self.setWindowTitle(f"PrimeDictate - {t('Yapay Zeka Destekli Sesli Yazma')}")
+        if hasattr(self, "quick_lang_combo"):
+            self.quick_lang_combo.setToolTip(t("Arayüz dili"))
+        for index, (label, tooltip, _, _) in enumerate(self.PAGE_DEFINITIONS):
+            if index < len(self.nav_buttons):
+                self.nav_buttons[index].setText(t(label))
+                self.nav_buttons[index].setToolTip(t(tooltip))
         for widget in self.findChildren(QWidget):
             if isinstance(widget, (QLabel, QPushButton, QCheckBox)):
                 widget.setText(t(widget.text()))
@@ -204,7 +241,7 @@ class MainWindow(QMainWindow):
                 widget.setPlaceholderText(t(widget.placeholderText()))
             if widget.toolTip():
                 widget.setToolTip(t(widget.toolTip()))
-            if isinstance(widget, QComboBox):
+            if isinstance(widget, QComboBox) and widget not in (getattr(self, "quick_lang_combo", None), getattr(self, "ui_language_combo", None)):
                 for index in range(widget.count()):
                     widget.setItemText(index, t(widget.itemText(index)))
         if hasattr(self, "about_version_label"):
@@ -249,7 +286,7 @@ class MainWindow(QMainWindow):
         hero_layout = QHBoxLayout(hero)
         hero_layout.setContentsMargins(26, 24, 26, 24)
         hero_text = QVBoxLayout()
-        self.hero_title = QLabel("Konuşun. Gerisini PrimeDictate halletsin.")
+        self.hero_title = QLabel("Konuşun. Gerisini Prime Dictate halletsin.")
         self.hero_title.setObjectName("heroTitle")
         self.hero_caption = QLabel("Global kısayolunuzla herhangi bir uygulamada dikteye başlayın.")
         self.hero_caption.setObjectName("heroCaption")
@@ -286,7 +323,7 @@ class MainWindow(QMainWindow):
         onboarding_layout.setSpacing(10)
         onboarding_eyebrow = QLabel("BAŞLANGIÇ")
         onboarding_eyebrow.setObjectName("sectionEyebrow")
-        onboarding_title = QLabel("PrimeDictate'i kullanıma hazırlayın")
+        onboarding_title = QLabel("Prime Dictate'i kullanıma hazırlayın")
         onboarding_title.setObjectName("onboardingTitle")
         onboarding_text = QLabel(
             "Henüz etkin bir dikte yapılandırması yok. STT motorunu, konuşma dilini ve mikrofonu "
@@ -337,7 +374,7 @@ class MainWindow(QMainWindow):
 
         engine_group = QGroupBox("1. Ses → Metin (STT)")
         engine_layout = QVBoxLayout(engine_group)
-        engine_layout.setSpacing(12)
+        engine_layout.setSpacing(14)
 
         engine_intro = QLabel(
             "Bu aşama yalnızca konuşmayı yazıya çevirir. Yerel seçenekler sesi cihazda işler; "
@@ -347,10 +384,27 @@ class MainWindow(QMainWindow):
         engine_intro.setWordWrap(True)
         engine_layout.addWidget(engine_intro)
 
-        h1 = QHBoxLayout()
+        # 1. Spoken Language (Konuşma Dili - En Üstte)
+        h_lang = QHBoxLayout()
+        language_label = QLabel("Konuşma dili")
+        language_label.setObjectName("fieldLabel")
+        h_lang.addWidget(language_label)
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem("Otomatik algıla", "auto")
+        featured_languages = ["tr", "en", "de", "fr", "es", "it", "pt", "ar", "ru", "zh", "ja", "ko"]
+        for code in featured_languages:
+            self.lang_combo.addItem(f"{self._language_name(code)} ({code})", code)
+        for code, name in sorted(STT_LANGUAGES.items(), key=lambda item: item[1]):
+            if code not in featured_languages:
+                self.lang_combo.addItem(f"{self._language_name(code)} ({code})", code)
+        h_lang.addWidget(self.lang_combo, 1)
+        engine_layout.addLayout(h_lang)
+
+        # 2. STT Backend Location
+        h_backend = QHBoxLayout()
         backend_label = QLabel("STT çalışma konumu")
         backend_label.setObjectName("fieldLabel")
-        h1.addWidget(backend_label)
+        h_backend.addWidget(backend_label)
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Yerel GPU • Vulkan (AMD / Intel / NVIDIA)", "vulkan")
         self.backend_combo.addItem("Yerel GPU • CUDA (NVIDIA)", "cuda")
@@ -359,20 +413,21 @@ class MainWindow(QMainWindow):
         self.backend_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.backend_combo.setMinimumContentsLength(24)
         self.backend_combo.setToolTip("Vulkan için uyumlu ekran kartı sürücüsü ve Vulkan ile derlenmiş whisper.cpp gerekir.")
-        h1.addWidget(self.backend_combo, 1)
-        engine_layout.addLayout(h1)
+        h_backend.addWidget(self.backend_combo, 1)
+        engine_layout.addLayout(h_backend)
 
         self.backend_description = QLabel()
         self.backend_description.setObjectName("infoNote")
         self.backend_description.setWordWrap(True)
         engine_layout.addWidget(self.backend_description)
 
+        # 3. Local STT Configuration & Unified Model Sub-card
         self.local_stt_widget = QFrame()
         self.local_stt_widget.setObjectName("subCard")
         local_layout = QVBoxLayout(self.local_stt_widget)
         local_layout.setContentsMargins(14, 13, 14, 13)
-        local_layout.setSpacing(10)
-        local_title = QLabel("YEREL WHISPER YAPILANDIRMASI")
+        local_layout.setSpacing(12)
+        local_title = QLabel("YEREL WHISPER YAPILANDIRMASI VE MODEL YÖNETİMİ")
         local_title.setObjectName("sectionEyebrow")
         local_layout.addWidget(local_title)
 
@@ -381,10 +436,16 @@ class MainWindow(QMainWindow):
         model_label.setObjectName("fieldLabel")
         h2.addWidget(model_label)
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["tiny", "base", "small", "medium", "large-v3-turbo"])
-        self.model_combo.currentTextChanged.connect(self.check_selected_model_status)
+        self.model_combo.addItem("tiny • ~75 MB (En hızlı, çok hafif)", "tiny")
+        self.model_combo.addItem("base • ~145 MB (Hızlı, temel doğruluk)", "base")
+        self.model_combo.addItem("small • ~490 MB (Dengeli performans)", "small")
+        self.model_combo.addItem("medium • ~1.5 GB (Yüksek doğruluk)", "medium")
+        self.model_combo.addItem("large-v3-turbo • ~1.6 GB (Hızlı & yüksek doğruluk)", "large-v3-turbo")
+        self.model_combo.addItem("large-v3 • ~3.1 GB (Maksimum doğruluk)", "large-v3")
+        self.model_combo.currentIndexChanged.connect(lambda: self.check_selected_model_status())
         h2.addWidget(self.model_combo, 1)
         local_layout.addLayout(h2)
+
         model_hint = QLabel(
             "Küçük modeller daha hızlı ve hafiftir; büyük modeller daha fazla bellek kullanır, "
             "genellikle daha yüksek doğruluk sağlar. Bu seçim yalnızca yerel motorları etkiler."
@@ -393,6 +454,33 @@ class MainWindow(QMainWindow):
         model_hint.setWordWrap(True)
         local_layout.addWidget(model_hint)
 
+        # Unified Model Download / Progress Status Frame
+        self.model_group = QFrame()
+        self.model_group.setObjectName("subCard")
+        m_layout = QVBoxLayout(self.model_group)
+        m_layout.setContentsMargins(12, 10, 12, 10)
+        m_layout.setSpacing(8)
+
+        self.model_status_label = QLabel("Model Durumu Kontrol Ediliyor...")
+        self.model_status_label.setWordWrap(True)
+        self.model_status_label.setStyleSheet("color: #cbd5e1; font-weight: 500;")
+        m_layout.addWidget(self.model_status_label)
+
+        self.model_progress = QProgressBar()
+        self.model_progress.setRange(0, 100)
+        self.model_progress.setValue(0)
+        self.model_progress.setTextVisible(True)
+        m_layout.addWidget(self.model_progress)
+
+        h_dl = QHBoxLayout()
+        self.download_model_btn = QPushButton("Seçilen Modeli İndir")
+        self.download_model_btn.clicked.connect(self.download_selected_model)
+        h_dl.addWidget(self.download_model_btn)
+        h_dl.addStretch()
+        m_layout.addLayout(h_dl)
+        local_layout.addWidget(self.model_group)
+
+        # Vulkan Runtime Widget
         self.vulkan_runtime_widget = QWidget()
         vulkan_layout = QVBoxLayout(self.vulkan_runtime_widget)
         vulkan_layout.setContentsMargins(0, 4, 0, 0)
@@ -412,8 +500,10 @@ class MainWindow(QMainWindow):
         self.vulkan_status_label.setObjectName("mutedLabel")
         vulkan_layout.addWidget(self.vulkan_status_label)
         local_layout.addWidget(self.vulkan_runtime_widget)
+
         engine_layout.addWidget(self.local_stt_widget)
 
+        # 4. Cloud STT Configuration Card
         self.cloud_stt_widget = QFrame()
         self.cloud_stt_widget.setObjectName("subCard")
         cloud_layout = QVBoxLayout(self.cloud_stt_widget)
@@ -451,75 +541,19 @@ class MainWindow(QMainWindow):
         engine_layout.addWidget(self.cloud_stt_widget)
         self.cloud_stt_combo.currentIndexChanged.connect(self._update_cloud_stt_models)
 
-        h3 = QHBoxLayout()
-        language_label = QLabel("Konuşma dili")
-        language_label.setObjectName("fieldLabel")
-        h3.addWidget(language_label)
-        self.lang_combo = QComboBox()
-        self.lang_combo.setEditable(True)
-        self.lang_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.lang_combo.addItem("Otomatik algıla", "auto")
-        featured_languages = ["tr", "en", "de", "fr", "es", "it", "pt", "ar", "ru", "zh", "ja", "ko"]
-        for code in featured_languages:
-            self.lang_combo.addItem(f"{self._language_name(code)} ({code})", code)
-        for code, name in sorted(STT_LANGUAGES.items(), key=lambda item: item[1]):
-            if code not in featured_languages:
-                self.lang_combo.addItem(f"{self._language_name(code)} ({code})", code)
-        self.lang_combo.completer().setCaseSensitivity(Qt.CaseInsensitive)
-        self.lang_combo.completer().setFilterMode(Qt.MatchContains)
-        h3.addWidget(self.lang_combo, 1)
-        engine_layout.addLayout(h3)
-        self.backend_combo.currentIndexChanged.connect(self._update_backend_fields)
-
-        layout.addWidget(engine_group)
-
-        self.model_group = QGroupBox("Yerel Whisper Modeli")
-        m_layout = QVBoxLayout(self.model_group)
-
-        self.model_status_label = QLabel("Model Durumu Kontrol Ediliyor...")
-        self.model_status_label.setWordWrap(True)
-        self.model_status_label.setStyleSheet("color: #cbd5e1; font-weight: 500;")
-        m_layout.addWidget(self.model_status_label)
-
-        self.model_progress = QProgressBar()
-        self.model_progress.setRange(0, 100)
-        self.model_progress.setValue(0)
-        self.model_progress.setTextVisible(True)
-        m_layout.addWidget(self.model_progress)
-
-        h_dl = QHBoxLayout()
-        self.download_model_btn = QPushButton("Seçilen Modeli İndir")
-        self.download_model_btn.clicked.connect(self.download_selected_model)
-        h_dl.addWidget(self.download_model_btn)
-        h_dl.addStretch()
-        m_layout.addLayout(h_dl)
-
-        layout.addWidget(self.model_group)
-
-        behavior_group = QGroupBox("Davranış ve Otomasyon")
-        b_layout = QVBoxLayout(behavior_group)
-        b_layout.setSpacing(10)
-
-        self.auto_paste_cb = QCheckBox("Metni aktif pencereye otomatik yapıştır")
-        self.restore_clip_cb = QCheckBox("Yapıştırmadan sonra önceki pano metnini geri yükle")
-        self.restore_clip_cb.setToolTip("Yalnızca düz metin korunur; resim, dosya ve biçimlendirilmiş pano içerikleri geri yüklenmez.")
-        self.history_enabled_cb = QCheckBox("Dikte geçmişini bu cihazda sakla")
-        self.play_sound_cb = QCheckBox("Kayıt başlangıç ve bitiş seslerini çal")
-        self.overlay_cb = QCheckBox("Yüzen ses dalgası göstergesini kullan")
-        self.start_windows_cb = QCheckBox("Windows ile otomatik başlat")
+        # 5. Engine Failover Sub-card (Fallback)
+        fallback_card = QFrame()
+        fallback_card.setObjectName("subCard")
+        fallback_layout = QVBoxLayout(fallback_card)
+        fallback_layout.setContentsMargins(14, 11, 14, 11)
         self.cloud_fallback_cb = QCheckBox("Yerel motor başarısızsa buluta geçmeme izin ver")
         self.cloud_fallback_cb.setToolTip("Açıldığında ses kaydı, yalnızca yerel işlem başarısız olursa seçili bulut STT servisine gönderilebilir.")
         self.cloud_fallback_cb.toggled.connect(self._update_backend_fields)
+        fallback_layout.addWidget(self.cloud_fallback_cb)
+        engine_layout.addWidget(fallback_card)
 
-        b_layout.addWidget(self.auto_paste_cb)
-        b_layout.addWidget(self.restore_clip_cb)
-        b_layout.addWidget(self.history_enabled_cb)
-        b_layout.addWidget(self.play_sound_cb)
-        b_layout.addWidget(self.overlay_cb)
-        b_layout.addWidget(self.start_windows_cb)
-        b_layout.addWidget(self.cloud_fallback_cb)
-
-        layout.addWidget(behavior_group)
+        self.backend_combo.currentIndexChanged.connect(self._update_backend_fields)
+        layout.addWidget(engine_group)
         layout.addStretch()
         return widget
 
@@ -559,8 +593,8 @@ class MainWindow(QMainWindow):
         provider = self.cloud_stt_combo.currentData()
         models = {
             "groq": ["whisper-large-v3-turbo", "whisper-large-v3"],
-            "openai": ["gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"],
-            "gemini": ["gemini-3.6-flash"],
+            "openai": ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"],
+            "gemini": ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro", "gemini-2.5-flash"],
         }
         saved_model = config_manager.get(f"stt_model_{provider}", "")
         self.cloud_stt_model_combo.clear()
@@ -624,10 +658,10 @@ class MainWindow(QMainWindow):
         self.ai_provider_combo = QComboBox()
         self.ai_provider_combo.addItem("Kural tabanlı • Yerel, hızlı, LLM kullanmaz", "rule_based")
         self.ai_provider_combo.addItem("Ollama / LM Studio • Yerel LLM", "custom_ollama")
-        self.ai_provider_combo.addItem("Google Gemini • Bulut LLM", "gemini")
-        self.ai_provider_combo.addItem("xAI Grok • Bulut LLM", "grok")
-        self.ai_provider_combo.addItem("Groq • Bulut LLM", "groq")
-        self.ai_provider_combo.addItem("OpenAI • Bulut LLM", "openai")
+        self.ai_provider_combo.addItem("Google Gemini • Bulut LLM (Gemini 3.6 / 3.1)", "gemini")
+        self.ai_provider_combo.addItem("OpenAI • Bulut LLM (GPT-5.4 / GPT-4o / o3-mini)", "openai")
+        self.ai_provider_combo.addItem("Groq • Bulut LLM (Llama 3.3 70B)", "groq")
+        self.ai_provider_combo.addItem("xAI Grok • Bulut LLM (Grok-4.5 / Grok-4.3)", "grok")
         h1.addWidget(self.ai_provider_combo, 1)
         processing_layout.addLayout(h1)
 
@@ -781,10 +815,11 @@ class MainWindow(QMainWindow):
 
     def _update_ai_models(self, provider: str):
         models = {
-            "gemini": ["gemini-3.6-flash"],
-            "openai": ["gpt-4o-mini"],
-            "groq": ["llama-3.3-70b-versatile"],
-            "grok": ["grok-beta"],
+            "gemini": ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro", "gemini-2.5-flash"],
+            "openai": ["gpt-5.4", "gpt-4o-mini", "gpt-4o", "o3-mini", "o4-mini"],
+            "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+            "grok": ["grok-4.5", "grok-4.3", "grok-4.1-fast"],
+            "custom_ollama": ["llama3.2", "llama3.1", "qwen2.5", "gemma2", "mistral"],
         }
         self.ai_model_combo.clear()
         self.ai_model_combo.addItems(models.get(provider, []))
@@ -975,6 +1010,27 @@ class MainWindow(QMainWindow):
         a_layout.addWidget(self.mic_progress)
 
         layout.addWidget(audio_group)
+
+        behavior_group = QGroupBox("Davranış ve Otomasyon")
+        b_layout = QVBoxLayout(behavior_group)
+        b_layout.setSpacing(10)
+
+        self.auto_paste_cb = QCheckBox("Metni aktif pencereye otomatik yapıştır")
+        self.restore_clip_cb = QCheckBox("Yapıştırmadan sonra önceki pano metnini geri yükle")
+        self.restore_clip_cb.setToolTip("Yalnızca düz metin korunur; resim, dosya ve biçimlendirilmiş pano içerikleri geri yüklenmez.")
+        self.history_enabled_cb = QCheckBox("Dikte geçmişini bu cihazda sakla")
+        self.play_sound_cb = QCheckBox("Kayıt başlangıç ve bitiş seslerini çal")
+        self.overlay_cb = QCheckBox("Yüzen ses dalgası göstergesini kullan")
+        self.start_windows_cb = QCheckBox("Windows ile otomatik başlat")
+
+        b_layout.addWidget(self.auto_paste_cb)
+        b_layout.addWidget(self.restore_clip_cb)
+        b_layout.addWidget(self.history_enabled_cb)
+        b_layout.addWidget(self.play_sound_cb)
+        b_layout.addWidget(self.overlay_cb)
+        b_layout.addWidget(self.start_windows_cb)
+
+        layout.addWidget(behavior_group)
         layout.addStretch()
         return widget
 
@@ -1116,7 +1172,7 @@ class MainWindow(QMainWindow):
         if backend == "cloud":
             return
         if not model_name:
-            model_name = self.model_combo.currentText()
+            model_name = self.model_combo.currentData() or self.model_combo.currentText()
 
         is_downloaded = model_manager.is_model_downloaded(model_name, backend)
         if is_downloaded:
@@ -1133,7 +1189,7 @@ class MainWindow(QMainWindow):
             self.download_model_btn.setText(t("Seçilen Modeli İndir"))
 
     def download_selected_model(self):
-        model_name = self.model_combo.currentText()
+        model_name = self.model_combo.currentData() or self.model_combo.currentText()
         backend = self.backend_combo.currentData()
         self.download_model_btn.setEnabled(False)
         self.download_model_btn.setText(t("İndiriliyor..."))
@@ -1167,9 +1223,14 @@ class MainWindow(QMainWindow):
             self.mic_combo.addItem(f"{dev['name']}", dev['index'])
 
     def load_settings_to_ui(self):
-        ui_language = config_manager.get("ui_language", "tr")
+        ui_language = config_manager.get("ui_language", "en")
         ui_language_index = self.ui_language_combo.findData(ui_language)
         self.ui_language_combo.setCurrentIndex(max(0, ui_language_index))
+        if hasattr(self, "quick_lang_combo"):
+            q_idx = self.quick_lang_combo.findData(ui_language)
+            self.quick_lang_combo.blockSignals(True)
+            self.quick_lang_combo.setCurrentIndex(max(0, q_idx))
+            self.quick_lang_combo.blockSignals(False)
 
         backend = config_manager.get("stt_backend", "cpu")
         backend_index = self.backend_combo.findData(backend)
@@ -1187,9 +1248,13 @@ class MainWindow(QMainWindow):
         model = config_manager.get("model_size", "base")
         if model == "turbo":
             model = "large-v3-turbo"
-        self.model_combo.setCurrentText(model)
+        m_idx = self.model_combo.findData(model)
+        if m_idx >= 0:
+            self.model_combo.setCurrentIndex(m_idx)
+        else:
+            self.model_combo.setCurrentText(model)
 
-        lang = config_manager.get("language", "tr")
+        lang = config_manager.get("language", "en")
         lang_idx = self.lang_combo.findData(lang)
         self.lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else self.lang_combo.findData("auto"))
 
@@ -1242,7 +1307,8 @@ class MainWindow(QMainWindow):
             "groq": self.groq_key_input.text().strip(),
             "openai": self.openai_key_input.text().strip(),
         }
-        if backend != "cloud" and not model_manager.is_model_downloaded(self.model_combo.currentText(), backend):
+        local_model = self.model_combo.currentData() or self.model_combo.currentText()
+        if backend != "cloud" and not model_manager.is_model_downloaded(local_model, backend):
             QMessageBox.warning(self, t("Kurulum tamamlanamadı"), t("Seçilen yerel Whisper modelini önce indirin."))
             self._set_page(1)
             return
@@ -1276,7 +1342,7 @@ class MainWindow(QMainWindow):
             "ui_language": self.ui_language_combo.currentData(),
             "setup_completed": True,
             "stt_backend": backend,
-            "model_size": self.model_combo.currentText(),
+            "model_size": self.model_combo.currentData() or self.model_combo.currentText(),
             "language": self.lang_combo.currentData() or "auto",
             "cloud_stt_provider": cloud_provider,
             f"stt_model_{cloud_provider}": self.cloud_stt_model_combo.currentText().strip(),
@@ -1334,7 +1400,7 @@ class MainWindow(QMainWindow):
             self.hero_state.setText(t("Henüz etkin yapılandırma yok"))
             return
 
-        self.hero_title.setText(t("Konuşun. Gerisini PrimeDictate halletsin."))
+        self.hero_title.setText(t("Konuşun. Gerisini Prime Dictate halletsin."))
         self.hero_caption.setText(t("Global kısayolunuzla herhangi bir uygulamada dikteye başlayın."))
         backend_labels = {
             "vulkan": "AMD / Vulkan",
@@ -1429,11 +1495,11 @@ class MainWindow(QMainWindow):
         self.dictate_btn.style().polish(self.dictate_btn)
 
         colors = {
-            "idle": ("#10231d", "#245441", "#78d6ad"),
-            "recording": ("#2a171a", "#71343b", "#f08d96"),
-            "transcribing": ("#282215", "#6b582b", "#e2c173"),
-            "success": ("#10231d", "#245441", "#78d6ad"),
-            "error": ("#2a171a", "#71343b", "#f08d96"),
+            "idle": ("#1a160e", "#3d321d", "#d2b879"),
+            "recording": ("#221215", "#52232a", "#e5828d"),
+            "transcribing": ("#1c1810", "#483c22", "#e0c586"),
+            "success": ("#1a160e", "#3d321d", "#d2b879"),
+            "error": ("#241215", "#58252c", "#e5828d"),
         }
         bg, border, color = colors.get(state, colors["idle"])
         self.status_label.setStyleSheet(

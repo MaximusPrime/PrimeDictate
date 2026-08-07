@@ -13,7 +13,7 @@ from src.ui.brand import app_mark_pixmap
 class WaveVisualizer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(96, 28)
+        self.setFixedSize(72, 22)
         self.level = 0.0
         self.phase = 0.0
 
@@ -25,9 +25,9 @@ class WaveVisualizer(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         cy = self.height() / 2.0
-        num_bars = 9
+        num_bars = 7
         bar_width = 3
-        spacing = 5
+        spacing = 4
         total_width = num_bars * bar_width + (num_bars - 1) * spacing
         start_x = (self.width() - total_width) / 2.0
         self.phase += 0.2
@@ -35,7 +35,7 @@ class WaveVisualizer(QWidget):
         for index in range(num_bars):
             x = start_x + index * (bar_width + spacing)
             wave = math.sin(self.phase + index * 0.72)
-            bar_height = max(5.0, (self.level * 22.0) * (0.5 + 0.5 * wave) + 4.0)
+            bar_height = max(4.0, (self.level * 16.0) * (0.5 + 0.5 * wave) + 3.0)
             color = QColor("#c3a56b") if index % 2 == 0 else QColor("#6fa6b4")
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.NoPen)
@@ -70,7 +70,7 @@ class FloatingOverlay(QWidget):
             | Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(438, 74)
+        self.setFixedSize(360, 58)
         self.drag_position = QPoint()
         self._has_saved_position = False
 
@@ -80,15 +80,15 @@ class FloatingOverlay(QWidget):
 
     def _setup_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setContentsMargins(5, 5, 5, 5)
 
         self.container = OverlaySurface(self)
         self.container.setObjectName("overlaySurface")
         self.container.setStyleSheet("""
             QWidget#overlaySurface {
-                background-color: rgba(14, 18, 24, 245);
-                border: 1px solid rgba(185, 155, 98, 175);
-                border-radius: 15px;
+                background-color: #0d1117;
+                border: 1px solid #c4a76e;
+                border-radius: 16px;
             }
             QLabel#overlayLogo, QLabel#overlayStatus, QLabel#dragGrip {
                 background: transparent;
@@ -102,46 +102,43 @@ class FloatingOverlay(QWidget):
             }
             QLabel#dragGrip {
                 color: #606a76;
-                font-size: 15px;
+                font-size: 14px;
                 padding-left: 2px;
             }
             QPushButton#overlayStop {
-                background-color: #28171a;
-                border: 1px solid #71343b;
-                border-radius: 8px;
+                background-color: #2b171a;
+                border: 1px solid #6e2f37;
+                border-radius: 15px;
                 color: #f3c4c8;
-                font-family: "Segoe UI";
-                font-size: 12px;
-                font-weight: 600;
-                min-width: 62px;
-                padding: 7px 10px;
+                font-size: 11px;
+                font-weight: bold;
             }
             QPushButton#overlayStop:hover {
-                background-color: #3a1d22;
-                border-color: #a9505a;
+                background-color: #421c21;
+                border-color: #a84753;
                 color: #ffffff;
             }
-            QPushButton#overlayStop:pressed { background-color: #521f28; }
-            QPushButton#overlayStop:disabled { color: #766268; border-color: #493036; }
+            QPushButton#overlayStop:pressed { background-color: #5c222a; }
+            QPushButton#overlayStop:disabled { color: #584448; border-color: #382528; background-color: #1e1315; }
         """)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(24)
-        shadow.setOffset(0, 5)
-        shadow.setColor(QColor(0, 0, 0, 170))
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 190))
         self.container.setGraphicsEffect(shadow)
 
         container_layout = QHBoxLayout(self.container)
-        container_layout.setContentsMargins(13, 8, 12, 8)
-        container_layout.setSpacing(10)
+        container_layout.setContentsMargins(10, 6, 10, 6)
+        container_layout.setSpacing(8)
 
         self.logo_label = QLabel()
         self.logo_label.setObjectName("overlayLogo")
-        self.logo_label.setFixedSize(42, 42)
+        self.logo_label.setFixedSize(32, 32)
         self.logo_label.setAlignment(Qt.AlignCenter)
         self.logo_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         logo_path = get_resource_path(os.path.join("assets", "PrimeDictate-AppIcon.png"))
         if os.path.exists(logo_path):
-            self.logo_label.setPixmap(app_mark_pixmap(40))
+            self.logo_label.setPixmap(app_mark_pixmap(30))
         else:
             self.logo_label.setText("PD")
 
@@ -149,12 +146,14 @@ class FloatingOverlay(QWidget):
         self.visualizer.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.status_label = QLabel(t("Dinleniyor..."))
         self.status_label.setObjectName("overlayStatus")
-        self.status_label.setMinimumWidth(105)
-        self.status_label.setMaximumWidth(105)
+        self.status_label.setMinimumWidth(85)
+        self.status_label.setMaximumWidth(95)
         self.status_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.stop_button = QPushButton(t("Durdur"))
+        self.stop_button = QPushButton("■")
         self.stop_button.setObjectName("overlayStop")
+        self.stop_button.setToolTip(t("Durdur"))
+        self.stop_button.setFixedSize(30, 30)
         self.stop_button.setCursor(Qt.PointingHandCursor)
         self.stop_button.clicked.connect(self._request_stop)
         self.drag_grip = QLabel("⋮⋮")

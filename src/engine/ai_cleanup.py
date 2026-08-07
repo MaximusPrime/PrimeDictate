@@ -75,7 +75,7 @@ class AICleanupEngine:
         elif provider == "grok":
             api_key = config_manager.get("api_key_grok", "")
             if api_key:
-                model = config_manager.get("ai_model_grok", "grok-beta")
+                model = config_manager.get("ai_model_grok", "grok-4.5")
                 result = self._clean_with_openai_compatible(text, "https://api.x.ai/v1", api_key, model, prompt)
                 if result:
                     return result

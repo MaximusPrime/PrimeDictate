@@ -1,22 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
-from build import write_version_file
-
-version_file = os.path.abspath(os.path.join('build', 'PrimeDictate.version.txt'))
-os.makedirs(os.path.dirname(version_file), exist_ok=True)
-write_version_file(version_file, 'PrimeDictate.exe')
 
 a = Analysis(
     ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('PrimeDictate-Logo.png', '.'),
-        ('assets/maximus-prime-software.png', 'assets'),
-        ('assets/PrimeDictate-AppIcon.png', 'assets'),
-        ('runtime', 'runtime'),
-    ],
+    datas=[('PrimeDictate-Logo.png', '.'), ('assets\\maximus-prime-software.png', 'assets'), ('assets\\PrimeDictate-AppIcon.png', 'assets'), ('runtime', 'runtime')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -43,8 +32,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version='C:\\Users\\MAXIMUS\\AppData\\Local\\Temp\\primedictate-version-zlzqzwpl\\directory-version.txt',
     icon=['PrimeDictate-Logo.ico'],
-    version=version_file,
 )
 coll = COLLECT(
     exe,

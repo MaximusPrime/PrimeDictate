@@ -89,8 +89,8 @@ class UIStructureTests(unittest.TestCase):
             overlay = FloatingOverlay()
         screen_geometry = overlay._target_screen(QPoint(0, 0)).availableGeometry()
         self.assertTrue(screen_geometry.adjusted(0, 0, -overlay.width(), -overlay.height()).contains(overlay.pos()))
-        self.assertEqual(overlay.size().width(), 438)
-        self.assertEqual(overlay.size().height(), 74)
+        self.assertEqual(overlay.size().width(), 360)
+        self.assertEqual(overlay.size().height(), 58)
         overlay.close()
 
     def test_overlay_stop_button_uses_controller_callback(self):

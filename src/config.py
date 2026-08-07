@@ -116,13 +116,13 @@ PRESET_PROMPTS = {
 }
 
 DEFAULT_CONFIG = {
-    "ui_language": "tr",
+    "ui_language": "en",
     "setup_completed": False,
     "hotkey": "ctrl+alt+d",
     "hotkey_mode": "toggle",  # "toggle" or "hold"
     "stt_backend": "cpu",  # "cuda", "vulkan", "cpu", "cloud"
     "model_size": "base",  # "tiny", "base", "small", "medium", "large-v3-turbo"
-    "language": "tr",  # Whisper language code or "auto"
+    "language": "en",  # Whisper language code or "auto"
     "cloud_stt_provider": "groq",  # "groq", "openai" or "gemini"
     "stt_model_groq": "whisper-large-v3-turbo",
     "stt_model_openai": "gpt-4o-mini-transcribe",
@@ -133,7 +133,7 @@ DEFAULT_CONFIG = {
     "ai_model_groq": "llama-3.3-70b-versatile",
     "ai_model_openai": "gpt-4o-mini",
     "ai_model_gemini": "gemini-3.6-flash",
-    "ai_model_grok": "grok-beta",
+    "ai_model_grok": "grok-4.5",
     "preset_prompt_key": "standard",
     "custom_user_rules": "",
     "custom_api_base_url": "http://localhost:11434/v1",  # For Ollama / LM Studio / OpenRouter
@@ -162,6 +162,7 @@ class ConfigManager:
 
     @staticmethod
     def _read_secret(key: str) -> str:
+        # 1. Try Windows Credential Manager
         try:
             import win32cred
             credential = win32cred.CredRead(
@@ -169,21 +170,43 @@ class ConfigManager:
                 win32cred.CRED_TYPE_GENERIC,
                 0,
             )
-            blob = credential.get("CredentialBlob", b"")
-            return blob.decode("utf-16-le") if isinstance(blob, bytes) else str(blob)
+            blob = credential.get("CredentialBlob", "")
+            if isinstance(blob, bytes):
+                return blob.decode("utf-16-le").rstrip("\x00")
+            return str(blob).rstrip("\x00")
         except Exception:
-            return ""
+            pass
+
+        # 2. Try Windows DPAPI fallback
+        try:
+            import win32crypt
+            import base64
+            enc_file = os.path.join(APP_DIR, f".sec_{key}.dat")
+            if os.path.exists(enc_file):
+                with open(enc_file, "r", encoding="utf-8") as f:
+                    cipher_text = f.read().strip()
+                if cipher_text:
+                    encrypted_bytes = base64.b64decode(cipher_text.encode("utf-8"))
+                    _, decrypted_bytes = win32crypt.CryptUnprotectData(encrypted_bytes, None, None, None, 0)
+                    return decrypted_bytes.decode("utf-8")
+        except Exception:
+            pass
+
+        return ""
 
     @staticmethod
     def _write_secret(key: str, value: str):
+        target = SECRET_TARGET_PREFIX + key
+        written = False
+
+        # 1. Try Windows Credential Manager
         try:
             import win32cred
-            target = SECRET_TARGET_PREFIX + key
             if value:
                 win32cred.CredWrite({
                     "Type": win32cred.CRED_TYPE_GENERIC,
                     "TargetName": target,
-                    "CredentialBlob": value.encode("utf-16-le"),
+                    "CredentialBlob": value,
                     "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
                     "UserName": "PrimeDictate",
                 }, 0)
@@ -192,8 +215,36 @@ class ConfigManager:
                     win32cred.CredDelete(target, win32cred.CRED_TYPE_GENERIC, 0)
                 except Exception:
                     pass
-        except Exception as exc:
-            raise RuntimeError(t("Windows kimlik bilgisi kasasına erişilemedi.")) from exc
+            written = True
+        except Exception:
+            written = False
+
+        # 2. Try Windows DPAPI fallback
+        try:
+            import win32crypt
+            import base64
+            enc_file = os.path.join(APP_DIR, f".sec_{key}.dat")
+            if value:
+                encrypted_bytes = win32crypt.CryptProtectData(
+                    value.encode("utf-8"),
+                    "PrimeDictateSecret",
+                    None,
+                    None,
+                    None,
+                    0,
+                )
+                cipher_text = base64.b64encode(encrypted_bytes).decode("utf-8")
+                with open(enc_file, "w", encoding="utf-8") as f:
+                    f.write(cipher_text)
+            else:
+                if os.path.exists(enc_file):
+                    os.remove(enc_file)
+            written = True
+        except Exception:
+            pass
+
+        if not written:
+            raise RuntimeError(t("Windows kimlik bilgisi kasasına erişilemedi."))
 
     def _migrate_legacy_settings(self):
         changed = False

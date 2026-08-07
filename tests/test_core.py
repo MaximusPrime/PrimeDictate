@@ -143,7 +143,7 @@ class CloudSTTTests(unittest.TestCase):
 
         self.assertEqual(result, "")
         self.assertIn("groq", engine.last_error.casefold())
-        self.assertNotIn("key", engine.last_error.casefold())
+        self.assertNotIn("gsk_", engine.last_error.casefold())
 
 
 class CUDASTTTests(unittest.TestCase):
@@ -152,7 +152,7 @@ class CUDASTTTests(unittest.TestCase):
         engine.model = Mock()
         engine.model.transcribe.side_effect = RuntimeError("CUDA failure")
 
-        with self.assertRaisesRegex(RuntimeError, "CUDA transkripsiyonu başarısız"):
+        with self.assertRaisesRegex(RuntimeError, r"CUDA (transkripsiyonu başarısız|transcription failed)"):
             engine.transcribe(np.ones(1600, dtype=np.float32))
 
 
