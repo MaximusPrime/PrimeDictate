@@ -29,6 +29,22 @@ class VulkanSTTEngine(BaseSTTEngine):
         self.model_path = None
         self.model_name = None
         self.last_inference_device = None
+        self._runtime_verified_at = 0.0
+        self._verified_executable = None
+
+    def _ensure_runtime_available(self, executable: str, max_age_seconds: float = 30.0):
+        now = time.monotonic()
+        if (
+            executable
+            and executable == self._verified_executable
+            and now - self._runtime_verified_at <= max_age_seconds
+        ):
+            return
+        available, message = self.runtime_status(executable)
+        if not available:
+            raise RuntimeError(translate("vulkan.error.runtime_unavailable", detail=message))
+        self._verified_executable = executable
+        self._runtime_verified_at = now
 
     @staticmethod
     def find_executable():
@@ -108,11 +124,10 @@ class VulkanSTTEngine(BaseSTTEngine):
 
     def load_model(self, model_name: str = "base", language: str = "tr"):
         executable = self.find_executable()
-        available, message = self.runtime_status(executable)
-        if not available:
-            raise RuntimeError(
-                f"{translate('vulkan.error.runtime_unavailable', detail=message)} {translate('vulkan.hint.select_runtime')}"
-            )
+        try:
+            self._ensure_runtime_available(executable)
+        except RuntimeError as error:
+            raise RuntimeError(f"{error} {translate('vulkan.hint.select_runtime')}") from error
 
         model_path = model_manager.get_model_path(model_name, "vulkan")
         if not os.path.isfile(model_path):
@@ -130,9 +145,7 @@ class VulkanSTTEngine(BaseSTTEngine):
         if not self.executable or not self.model_path:
             self.load_model(config_manager.get("model_size", "base"), language)
         else:
-            available, message = self.runtime_status(self.executable)
-            if not available:
-                raise RuntimeError(translate("vulkan.error.runtime_unavailable", detail=message))
+            self._ensure_runtime_available(self.executable)
 
         with tempfile.TemporaryDirectory(prefix="primedictate-vulkan-") as temp_dir:
             audio_path = os.path.join(temp_dir, "audio.wav")

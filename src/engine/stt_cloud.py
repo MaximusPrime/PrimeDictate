@@ -3,6 +3,7 @@ import base64
 import logging
 import soundfile as sf
 import requests
+from requests.adapters import HTTPAdapter
 import numpy as np
 from src.engine.stt_base import BaseSTTEngine, TranscriptionCancelled
 from src.engine.provider_transport import (
@@ -59,6 +60,30 @@ class CloudSTTEngine(BaseSTTEngine):
     def __init__(self):
         self.last_error = None
         self.last_failure = None
+        # The engine instance is retained by EngineManager. Reusing one HTTP
+        # pool avoids DNS/TCP/TLS setup on every short dictation.
+        self._session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4, max_retries=0)
+        self._session.mount("https://", adapter)
+        self._openai_client = None
+        self._openai_api_key = None
+
+    def close(self):
+        self._session.close()
+        client = self._openai_client
+        self._openai_client = None
+        self._openai_api_key = None
+        if client is not None and hasattr(client, "close"):
+            client.close()
+
+    def _get_openai_client(self, api_key: str):
+        if self._openai_client is None or self._openai_api_key != api_key:
+            if self._openai_client is not None and hasattr(self._openai_client, "close"):
+                self._openai_client.close()
+            from openai import OpenAI
+            self._openai_client = OpenAI(api_key=api_key, timeout=45, max_retries=0)
+            self._openai_api_key = api_key
+        return self._openai_client
 
     def load_model(self, model_name: str = "whisper-large-v3-turbo", language: str = "tr"):
         pass  # Cloud APIs load model remotely on server
@@ -95,7 +120,7 @@ class CloudSTTEngine(BaseSTTEngine):
                 if language != "auto":
                     data["language"] = language
                 resp = run_cancellable(
-                    lambda: requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=(5, 45)),
+                    lambda: self._session.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=(5, 45)),
                     cancel_check,
                 )
                 if resp.status_code == 200:
@@ -119,8 +144,7 @@ class CloudSTTEngine(BaseSTTEngine):
 
         if provider == "openai" and api_key_openai:
             try:
-                from openai import OpenAI
-                client = OpenAI(api_key=api_key_openai, timeout=45, max_retries=0)
+                client = self._get_openai_client(api_key_openai)
                 buffer.seek(0)
                 selected_model = model or "gpt-4o-mini-transcribe"
                 request = {"model": selected_model, "file": buffer}
@@ -172,7 +196,7 @@ class CloudSTTEngine(BaseSTTEngine):
                         f"{model or 'gemini-3.6-flash'}:generateContent"
                     )
                     response = run_cancellable(
-                        lambda: requests.post(
+                        lambda: self._session.post(
                             url, headers={"x-goog-api-key": api_key_gemini}, json=payload, timeout=(5, 60)
                         ),
                         cancel_check,

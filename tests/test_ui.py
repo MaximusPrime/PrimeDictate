@@ -33,6 +33,7 @@ class UIStructureTests(unittest.TestCase):
         controller.main_window.prepare_shutdown.return_value = False
         controller._processing_thread = None
         controller.operation_coordinator = Mock()
+        controller.engine_manager = Mock()
         controller.instance_lock = Mock()
         controller.app = Mock()
 
@@ -42,6 +43,7 @@ class UIStructureTests(unittest.TestCase):
         controller.tray.shutdown.assert_called_once_with()
         controller.hotkey_listener.stop_listening.assert_called_once_with()
         controller.main_window.hide.assert_called_once_with()
+        controller.engine_manager.shutdown.assert_called_once_with()
         controller.app.quit.assert_called_once_with()
 
     def test_worker_completion_signal_is_queued_to_gui_thread(self):

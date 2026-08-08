@@ -37,6 +37,16 @@ class EngineManager:
                 self.engines[backend] = CPUSTTEngine()
         return self.engines[backend]
 
+    def shutdown(self):
+        for engine in tuple(self.engines.values()):
+            close = getattr(engine, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.exception("Could not close transcription engine cleanly.")
+        self.engines.clear()
+
     def process_audio(self, audio: np.ndarray, sample_rate: int = 16000, language_override: str = None, cancel_check=None, apply_text_processing: bool = True) -> str:
         if len(audio) == 0:
             return ""

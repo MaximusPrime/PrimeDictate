@@ -3,6 +3,7 @@ import os
 import winsound
 import threading
 import logging
+import time
 from enum import Enum
 from PySide6.QtCore import QObject, Signal, Slot, QTimer, QLockFile, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -73,6 +74,7 @@ class PrimeDictateApp(QObject):
         self.target_window = None
         self._shutdown_requested = threading.Event()
         self._processing_thread = None
+        self._dictation_stopped_at = None
         self._quitting = False
         
         # UI Elements
@@ -183,6 +185,7 @@ class PrimeDictateApp(QObject):
         if config_manager.get("play_sound", True):
             threading.Thread(target=lambda: winsound.Beep(800, 150), daemon=True).start()
 
+        self._dictation_stopped_at = time.perf_counter()
         self._set_state(AppState.TRANSCRIBING, translate("status.transcribing"))
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_recording_active(False)
@@ -302,6 +305,12 @@ class PrimeDictateApp(QObject):
             QTimer.singleShot(1500, lambda: self._set_state(AppState.IDLE, translate("status.ready")))
 
     def _finish_dictation_operation(self):
+        if self._dictation_stopped_at is not None:
+            logger.info(
+                "Dictation stop-to-result latency=%.3f seconds.",
+                time.perf_counter() - self._dictation_stopped_at,
+            )
+            self._dictation_stopped_at = None
         self.operation_coordinator.finish("dictation")
         self._processing_thread = None
         self.hotkey_listener.sync_recording_state(False)
@@ -330,6 +339,7 @@ class PrimeDictateApp(QObject):
             if processing_thread.is_alive():
                 logger.error("Dictation worker did not stop during application exit; abandoning daemon worker.")
         self.main_window.hide()
+        self.engine_manager.shutdown()
         self.operation_coordinator.finish("dictation")
         self.instance_lock.unlock()
         self.app.quit()

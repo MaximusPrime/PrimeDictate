@@ -329,10 +329,10 @@ class CloudSTTTests(unittest.TestCase):
         }
         response = Mock(status_code=400, headers={})
         response.json.return_value = {"error": {"message": "secret-key private audio detail"}}
+        engine = CloudSTTEngine()
         with patch("src.engine.stt_cloud.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
-             patch("src.engine.stt_cloud.requests.post", return_value=response), \
+             patch.object(engine._session, "post", return_value=response), \
              self.assertLogs("PrimeDictate.STT_Cloud", level="WARNING") as logs:
-            engine = CloudSTTEngine()
             engine.transcribe(np.zeros(1600, dtype=np.float32))
 
         output = "\n".join(logs.output)
@@ -350,9 +350,10 @@ class CloudSTTTests(unittest.TestCase):
         response.json.return_value = {
             "candidates": [{"content": {"parts": [{"text": "Merhaba dünya"}]}}]
         }
+        engine = CloudSTTEngine()
         with patch("src.engine.stt_cloud.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
-             patch("src.engine.stt_cloud.requests.post", return_value=response) as post:
-            result = CloudSTTEngine().transcribe(np.zeros(1600, dtype=np.float32))
+             patch.object(engine._session, "post", return_value=response) as post:
+            result = engine.transcribe(np.zeros(1600, dtype=np.float32))
 
         self.assertEqual(result, "Merhaba dünya")
         self.assertIn("/stt-model:generateContent", post.call_args.args[0])
@@ -397,6 +398,23 @@ class CloudSTTTests(unittest.TestCase):
         self.assertEqual(result, "Merhaba")
         self.assertNotIn("language", create.call_args.kwargs)
         self.assertNotIn("extra_body", create.call_args.kwargs)
+
+    def test_openai_client_is_reused_between_dictations(self):
+        engine = CloudSTTEngine()
+        client = Mock()
+        client.audio.transcriptions.create.return_value = Mock(text="Merhaba")
+        values = {
+            "cloud_stt_provider": "openai",
+            "stt_model_openai": "gpt-4o-mini-transcribe",
+            "api_key_openai": "secret-api-key",
+        }
+        with patch("src.engine.stt_cloud.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("openai.OpenAI", return_value=client) as constructor:
+            engine.transcribe(np.zeros(1600, dtype=np.float32))
+            engine.transcribe(np.zeros(1600, dtype=np.float32))
+
+        constructor.assert_called_once_with(api_key="secret-api-key", timeout=45, max_retries=0)
+        self.assertEqual(client.audio.transcriptions.create.call_count, 2)
 
     def test_openai_exception_log_does_not_include_exception_message_or_key(self):
         error = RuntimeError("secret-api-key and raw audio bytes")
@@ -551,6 +569,14 @@ class VulkanSTTTests(unittest.TestCase):
             self.assertEqual(VulkanSTTEngine._beam_size(), 5)
         with patch("src.engine.stt_vulkan.config_manager.get", return_value="invalid"):
             self.assertEqual(VulkanSTTEngine._beam_size(), 1)
+
+    def test_vulkan_reuses_recent_runtime_verification(self):
+        engine = VulkanSTTEngine()
+        with patch.object(VulkanSTTEngine, "runtime_status", return_value=(True, "ready")) as status:
+            engine._ensure_runtime_available("whisper-cli.exe")
+            engine._ensure_runtime_available("whisper-cli.exe")
+
+        status.assert_called_once_with("whisper-cli.exe")
 
     def test_vulkan_rejects_unverified_cpu_fallback(self):
         engine = VulkanSTTEngine()
