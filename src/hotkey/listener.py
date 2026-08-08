@@ -134,3 +134,8 @@ class HotkeyListener:
 
     def sync_recording_state(self, is_recording: bool):
         self.is_recording = is_recording
+        if not is_recording:
+            # Synthetic keys used by auto-paste and a key-up arriving while the
+            # GUI thread changes state must not leak into the next dictation.
+            self.pressed_keys.clear()
+            self._combo_active = False

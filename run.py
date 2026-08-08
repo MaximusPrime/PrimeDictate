@@ -73,6 +73,7 @@ class PrimeDictateApp(QObject):
         self.target_window = None
         self._shutdown_requested = threading.Event()
         self._processing_thread = None
+        self._quitting = False
         
         # UI Elements
         self.main_window = MainWindow(app_controller=self)
@@ -232,6 +233,9 @@ class PrimeDictateApp(QObject):
 
     @Slot(str)
     def _on_transcription_complete(self, text: str):
+        if self._shutdown_requested.is_set():
+            self._finish_dictation_operation()
+            return
         logger.info("Final transcription ready (%d characters).", len(text))
 
         # Inject into active focused window via clipboard Ctrl+V
@@ -244,7 +248,7 @@ class PrimeDictateApp(QObject):
         # Add to history
         self.main_window.add_history_entry(text)
         self.main_window.update_transcription_metadata(self.engine_manager.last_transcription_info)
-        self.operation_coordinator.finish("dictation")
+        self._finish_dictation_operation()
         result_message = translate("result.pasted" if pasted else "result.copied")
         processing_info = self.engine_manager.last_transcription_info.get("text_processing", {})
         if processing_info.get("fallback_used"):
@@ -266,7 +270,9 @@ class PrimeDictateApp(QObject):
 
     @Slot(str, str)
     def _on_status_changed(self, msg: str, color_hex: str):
-        self.operation_coordinator.finish("dictation")
+        self._finish_dictation_operation()
+        if self._shutdown_requested.is_set():
+            return
         self._set_state(AppState.ERROR, msg)
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status(msg, color_hex)
@@ -288,35 +294,35 @@ class PrimeDictateApp(QObject):
         if state == AppState.SUCCESS:
             QTimer.singleShot(1500, lambda: self._set_state(AppState.IDLE, translate("status.ready")))
 
+    def _finish_dictation_operation(self):
+        self.operation_coordinator.finish("dictation")
+        self._processing_thread = None
+        self.hotkey_listener.sync_recording_state(False)
+
     def run(self):
         self.main_window.show()
         sys.exit(self.app.exec())
 
     def quit(self):
+        if self._quitting:
+            return
+        self._quitting = True
         self._shutdown_requested.set()
+        # Exit is explicit: remove every top-level surface immediately so a
+        # slow/cancelled worker can never leave an orphaned overlay behind.
+        self.overlay.hide()
+        self.tray.shutdown()
+        self.hotkey_listener.stop_listening()
         if self.recorder.is_recording:
             self.recorder.stop_recording()
         if not self.main_window.prepare_shutdown():
-            self._shutdown_requested.clear()
-            QMessageBox.warning(
-                self.main_window,
-                translate("dialog.operation_in_progress"),
-                translate("shutdown.file_busy"),
-            )
-            return
+            logger.error("File transcription worker did not stop during application exit.")
         processing_thread = self._processing_thread
         if processing_thread and processing_thread.is_alive():
             processing_thread.join(timeout=10)
             if processing_thread.is_alive():
-                self._shutdown_requested.clear()
-                QMessageBox.warning(
-                    self.main_window,
-                    translate("dialog.operation_in_progress"),
-                    translate("shutdown.dictation_busy"),
-                )
-                return
-        self.hotkey_listener.stop_listening()
-        self.tray.shutdown()
+                logger.error("Dictation worker did not stop during application exit; abandoning daemon worker.")
+        self.main_window.hide()
         self.operation_coordinator.finish("dictation")
         self.instance_lock.unlock()
         self.app.quit()

@@ -35,6 +35,18 @@ from src.hotkey.listener import HotkeyListener, canonicalize_hotkey
 
 
 class HotkeyListenerTests(unittest.TestCase):
+    def test_sync_to_idle_clears_stale_key_state(self):
+        listener = HotkeyListener()
+        listener.is_recording = True
+        listener.pressed_keys = {"ctrl", "v"}
+        listener._combo_active = True
+
+        listener.sync_recording_state(False)
+
+        self.assertFalse(listener.is_recording)
+        self.assertEqual(listener.pressed_keys, set())
+        self.assertFalse(listener._combo_active)
+
     @staticmethod
     def _event(name, event_type):
         event = Mock()

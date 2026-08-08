@@ -21,6 +21,29 @@ from run import AppSignals, PrimeDictateApp
 
 
 class UIStructureTests(unittest.TestCase):
+    def test_quit_hides_all_surfaces_and_quits_even_if_worker_is_slow(self):
+        controller = PrimeDictateApp.__new__(PrimeDictateApp)
+        controller._quitting = False
+        controller._shutdown_requested = threading.Event()
+        controller.overlay = Mock()
+        controller.tray = Mock()
+        controller.hotkey_listener = Mock()
+        controller.recorder = Mock(is_recording=False)
+        controller.main_window = Mock()
+        controller.main_window.prepare_shutdown.return_value = False
+        controller._processing_thread = None
+        controller.operation_coordinator = Mock()
+        controller.instance_lock = Mock()
+        controller.app = Mock()
+
+        controller.quit()
+
+        controller.overlay.hide.assert_called_once_with()
+        controller.tray.shutdown.assert_called_once_with()
+        controller.hotkey_listener.stop_listening.assert_called_once_with()
+        controller.main_window.hide.assert_called_once_with()
+        controller.app.quit.assert_called_once_with()
+
     def test_worker_completion_signal_is_queued_to_gui_thread(self):
         app = QApplication.instance() or QApplication([])
         delivered = threading.Event()
