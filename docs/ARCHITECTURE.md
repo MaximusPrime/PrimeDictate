@@ -67,7 +67,8 @@ The main action button and tray route through the controller toggle operation. T
 9. AICleanupEngine optionally processes the raw transcript.
 10. The final text returns to the Qt thread through a signal.
 11. PasteInjector restores the captured target and sends Ctrl+V only if focus validation succeeds.
-12. The transcript may be added to local history.
+12. The controller releases the dictation operation and returns to `IDLE` immediately.
+13. The transcript may be added to local history; history/dashboard rendering cannot hold the state machine in `TRANSCRIBING`.
 ```
 
 Audio processing runs in a daemon worker thread. Qt widgets are updated only through signals connected to the main thread.
@@ -104,7 +105,9 @@ CPU uses `int8`. CUDA attempts `float16` first and falls back to CUDA `int8` mod
 
 ### Vulkan
 
-The Vulkan backend executes a pinned whisper.cpp CLI in a temporary directory. It writes an input WAV, requests text output without timestamps, reads the generated transcript, and deletes temporary files with the directory context.
+The Vulkan backend prefers a pinned `whisper-server` built from the same whisper.cpp commit and DLL set as the verified CLI. `EngineManager` starts background warmup after application initialization; the server loads the selected GGML model once and remains alive for consecutive requests. It binds to `127.0.0.1` on a dynamically reserved port, and every process receives an unguessable request-path prefix. Audio is sent as an in-memory PCM16 WAV over loopback.
+
+If server startup, health checking, or inference fails, the engine stops the server and falls back to the pinned CLI. The fallback writes an input WAV in a temporary directory, requests text output without timestamps, reads the transcript, and removes the temporary directory. Application shutdown closes the loopback session and terminates the owned server process.
 
 Before model use, the backend:
 
@@ -113,6 +116,7 @@ Before model use, the backend:
 3. Inspects CLI help output for whisper.cpp and Vulkan indicators.
 4. Identifies the reported Vulkan device.
 5. Resolves the corresponding GGML model.
+6. Uses the server only when it is adjacent to the verified CLI, preventing mixed runtime ABIs.
 
 ### Cloud STT
 
@@ -164,7 +168,7 @@ Preset prompts preserve the transcript language unless the selected profile expl
 
 ## File Transcription
 
-`FileTranscribeWorker` is a cooperatively cancellable `QThread`. Cancellation is propagated through `EngineManager` without triggering cloud fallback. CPU/CUDA check between decoded segments, Vulkan terminates its active subprocess, and cloud requests check cancellation before dispatch and after the blocking provider call returns.
+`FileTranscribeWorker` is a cooperatively cancellable `QThread`. Cancellation is propagated through `EngineManager` without triggering cloud fallback. CPU/CUDA check between decoded segments. Persistent Vulkan and cloud requests check cancellation before dispatch and after the blocking HTTP call returns; the one-shot Vulkan fallback can terminate its active CLI subprocess.
 
 PyAV decodes the selected media stream and resamples it to mono 16 kHz. Pending samples are emitted in bounded 30-second chunks. Progress is calculated from stream duration when available.
 
@@ -241,7 +245,7 @@ Conditional controls are tied to active capability:
 
 ## Overlay Geometry
 
-`FloatingOverlay` is a fixed-size, non-focus-accepting tool window.
+`FloatingOverlay` is a fixed-size, non-focus-accepting tool window. Recording shows the live waveform and Stop control; processing shows a localized status label with Play disabled; completion returns the controller to `IDLE` immediately and re-enables Play. Result timers are state-guarded so they cannot hide or reset a newer recording.
 
 At first use it selects the screen under the cursor and positions itself above the bottom-center of the available geometry. Stored coordinates are clamped to a valid connected display on load, show, drag, and release. A successful drag persists the final position.
 
@@ -275,7 +279,7 @@ assets/maximus-prime-software.png
 runtime/
 ```
 
-The pinned Vulkan runtime includes its own upstream license, provenance record, and checksum manifest.
+The pinned Vulkan runtime includes the CLI, loopback server, shared libraries, upstream license, provenance record, and checksum manifest. The server binary is tracked with Git LFS and packaged by both PyInstaller targets through the shared `runtime/` data tree.
 
 ## Test Strategy
 
@@ -293,6 +297,7 @@ Core tests cover:
 - Credential serialization safety
 - Clipboard focus safety
 - Vulkan command construction
+- Persistent Vulkan server reuse and CLI fallback boundaries
 
 UI tests cover:
 
@@ -301,6 +306,7 @@ UI tests cover:
 - Turkish-English catalog round trips
 - Full Whisper language list exposure
 - Overlay geometry clamping
+- Overlay processing/ready state behavior
 - Studio asset declarations in build paths
 
 ## Extension Guidelines

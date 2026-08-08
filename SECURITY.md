@@ -78,6 +78,8 @@ The user controls the configured Ollama or LM Studio endpoint. PrimeDictate does
 
 The bundled Vulkan runtime is checked against a shipped SHA-256 manifest. Downloaded model trust also depends on the configured upstream source and network environment.
 
+The persistent Vulkan server is an application-owned local subprocess. It binds only to `127.0.0.1`, selects a dynamic high port, and uses a per-process unguessable request-path prefix. PrimeDictate accepts the server only from the same verified runtime directory as `whisper-cli.exe`, does not enable media conversion or expose it to the LAN, and terminates it during normal shutdown. If startup or inference fails, the application falls back to the verified one-shot CLI path.
+
 ## In-Scope Examples
 
 - API credentials written to plaintext configuration or logs

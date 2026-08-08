@@ -26,13 +26,14 @@ PrimeDictate records from a global hotkey, transcribes with the selected local o
 
 - System-wide dictation with configurable **Toggle** and **Push-to-Talk (Hold)** modes.
 - Local Whisper on CPU, NVIDIA CUDA, or Vulkan-capable AMD/Intel/NVIDIA GPUs.
+- Persistent loopback-only Vulkan inference with background model warmup for fast consecutive dictation.
 - Separate managed models for faster-whisper (CPU/CUDA) and whisper.cpp GGML (Vulkan).
 - Optional Groq, OpenAI, and Gemini Audio cloud transcription.
 - Optional rule-based cleanup, local Ollama/LM Studio, or cloud LLM processing.
 - Turkish and English interfaces backed by complete, matching locale catalogs.
 - Adaptive voice activity detection, bounded recordings, and background finalization.
 - Chunked, cancellable media transcription with overlap de-duplication and TXT/SRT/VTT/JSON export.
-- Focus-safe paste, clipboard restoration, searchable local history, and a draggable multi-monitor overlay.
+- Focus-safe paste, clipboard restoration, searchable local history, and a draggable multi-monitor overlay with explicit processing/ready feedback.
 - Credentials in Windows Credential Manager, redacted rotating logs, and privacy-safe diagnostic ZIPs.
 - State-aware system tray controls and single-instance application lifecycle.
 
@@ -78,7 +79,9 @@ Cloud fallback is disabled by default and requires explicit consent. When enable
 
 CPU and GPU can be changed later in **Speech to Text**; the first-run choice is not permanent. PrimeDictate validates the chosen backend, reports the detected device, and prevents incompatible model/backend combinations.
 
-CPU may still beat Vulkan for very short recordings when GPU model loading and process startup dominate total time, or when the GPU/driver is weak. A warm Vulkan backend usually becomes more advantageous for longer audio and repeated dictation. CUDA is typically the preferred local route on a supported NVIDIA GPU. Measure with the same audio and model on your own machine; model size, driver, CPU, GPU, and recording length all matter.
+PrimeDictate warms the selected local engine in the background after startup. The bundled Vulkan path keeps the selected GGML model in a loopback-only `whisper-server` process, avoiding repeated process and model-loading cost during consecutive dictation. If the persistent server cannot start or answer, PrimeDictate automatically falls back to its verified one-shot CLI path. CPU may still win on some systems, and CUDA is typically preferred on a supported NVIDIA GPU; measure on the target hardware because model size, driver, CPU, GPU, and recording length all matter.
+
+The floating control shows **Transcribing** while a result is pending. As soon as the result is available, dictation returns to idle immediately and the Play control becomes available; no artificial success cooldown is imposed. Diagnostic logs include `Dictation stop-to-result latency=...` for end-to-end measurement.
 
 Supported local sizes depend on the runtime. CPU/CUDA use faster-whisper model packages; Vulkan uses compatible whisper.cpp GGML packages and therefore stores a separate copy. `large-v3` is not offered where the bundled Vulkan catalog has no compatible artifact; `large-v3-turbo` is the high-end Vulkan option.
 
@@ -113,7 +116,7 @@ Clipboard insertion remembers the target window before recording and restores fo
 
 ## File Transcription
 
-Supported containers include `.mp3`, `.wav`, `.mp4`, `.m4a`, `.mkv`, `.flac`, and `.ogg`. Long media is decoded incrementally, processed in overlapping bounded chunks, and de-duplicated at chunk boundaries. Jobs can be cancelled; CPU/CUDA stop at safe segment boundaries, Vulkan terminates its active CLI process, and a provider request may first need to return or time out.
+Supported containers include `.mp3`, `.wav`, `.mp4`, `.m4a`, `.mkv`, `.flac`, and `.ogg`. Long media is decoded incrementally, processed in overlapping bounded chunks, and de-duplicated at chunk boundaries. Jobs can be cancelled; CPU/CUDA stop at safe segment boundaries, a persistent Vulkan or cloud HTTP request may first need to return, and the one-shot Vulkan fallback terminates its active CLI process.
 
 Exports include plain text plus timestamp-aware SRT, VTT, and JSON formats.
 
@@ -182,7 +185,7 @@ PrimeDictate/
 |   |-- injector/                Focus-safe clipboard insertion
 |   |-- locales/                 English and Turkish JSON catalogs
 |   `-- ui/                      Window, pages, tray, overlay, styling
-|-- runtime/whisper-vulkan/      Pinned runtime, hashes, provenance
+|-- runtime/whisper-vulkan/      Pinned CLI/server runtime, hashes, provenance
 |-- tests/                        Core and UI regression tests
 `-- docs/                         Guides, architecture, screenshots
 ```
@@ -192,7 +195,7 @@ See [Architecture](docs/ARCHITECTURE.md) for component contracts and data flow.
 ## Verification Boundaries
 
 - The application is Windows-only.
-- Vulkan behavior depends on the installed driver and hardware despite runtime preflight checks.
+- Vulkan behavior depends on the installed driver and hardware despite runtime preflight checks. The persistent server binds only to loopback on a random port with a per-process unguessable request path.
 - CUDA paths, catalogs, and failure handling are covered by automated tests, but this release was not physically benchmarked on an NVIDIA card by the maintainer producing these artifacts.
 - Cloud behavior also depends on provider availability, account access, quota, and API changes.
 - A successful build cannot replace validation on the target microphone, CPU/GPU, driver, and Windows configuration.

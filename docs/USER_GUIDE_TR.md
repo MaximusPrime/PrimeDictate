@@ -99,10 +99,13 @@ CUDA `float16` yüklemesi başarısız olursa uygulama desteklendiği ölçüde 
 
 PrimeDictate, Vulkan desteğiyle derlenmiş whisper.cpp çalışma zamanını kullanır. AMD ve Intel GPU'lar için temel yerel hızlandırma seçeneğidir; uyumlu NVIDIA cihazlarda da kullanılabilir.
 
+Uygulama açıldıktan sonra seçilen model arka planda hazırlanır. Dahili `whisper-server` modeli bellekte tutarak ardışık diktelerde tekrar model yükleme maliyetini kaldırır. İlk hazırlık birkaç saniye sürebilir; sonraki dikteler aynı kalıcı motoru kullanır. Sunucu yalnızca yerel bilgisayardaki `127.0.0.1` adresine, rastgele porta ve o çalıştırmaya özel gizli istek yoluna bağlanır. Başlatılamazsa uygulama doğrulanmış tek-seferlik CLI yöntemine otomatik döner.
+
 Uygulama:
 
 - Dahili runtime dosyalarının SHA-256 bütünlüğünü kontrol eder.
 - CLI'ın gerçek Vulkan backend içerdiğini doğrular.
+- Kalıcı server'ı yalnızca doğrulanmış CLI ile aynı runtime klasöründen çalıştırır.
 - Algılanan Vulkan cihazını gösterir.
 - İleri seviye kullanım için özel `whisper-cli.exe` seçimine izin verir.
 
@@ -240,7 +243,7 @@ Konum davranışı:
 - Bırakılan konum ayarlara kaydedilir.
 - Monitör veya çözünürlük değiştiğinde kayıtlı konum en yakın geçerli ekran alanına çekilir.
 
-Gösterge pencere odağını almadan kayıt, transkripsiyon, başarı ve hata durumlarını bildirir.
+Gösterge pencere odağını almadan kayıt, transkripsiyon, başarı ve hata durumlarını bildirir. Kayıt sırasında ses dalgası ile Durdur düğmesi görünür. Sonuç beklenirken sarı **Metne çevriliyor** durumu gösterilir ve Play bilinçli olarak devre dışıdır. Sonuç gelir gelmez Play yeniden etkinleşir; yeni dikte için ek başarı bekleme süresi yoktur. Yeşil sonuç veya **Hazır** durumu, ana pencere kapalıyken de motorun yeniden kullanılabildiğini gösterir.
 
 ## Dosya Transkripsiyonu
 
@@ -250,7 +253,7 @@ Desteklenen biçimler:
 .mp3  .wav  .mp4  .m4a  .mkv  .flac  .ogg
 ```
 
-Dosyalar belleğe bütünüyle yüklenmek yerine sınırlı parçalar halinde çözülür. İptal işlemi işbirliklidir: CPU/CUDA segment sınırında durur, Vulkan çalışan CLI sürecini sonlandırır; devam eden bir bulut HTTP isteğinin ise iptal tamamlanmadan önce dönmesi gerekebilir.
+Dosyalar belleğe bütünüyle yüklenmek yerine sınırlı parçalar halinde çözülür. İptal işlemi işbirliklidir: CPU/CUDA segment sınırında durur; kalıcı Vulkan veya bulut HTTP isteğinin tamamlanması gerekebilir; tek-seferlik Vulkan fallback kullanılıyorsa çalışan CLI süreci sonlandırılabilir.
 
 Canlı dikteyle aynı STT motoru, dil ve metin işleme ayarları kullanılır. Özet veya çeviri profili seçiliyse bu profil dosya parçalarının sonuçlarına da uygulanır.
 
@@ -344,6 +347,8 @@ Profil: Kodlama ve teknik terimler
 2. Dahili runtime durumunu kontrol edin.
 3. Bütünlük hatası varsa uygulama paketini güvenilir kaynaktan yeniden edinin.
 4. Donanım Vulkan desteklemiyorsa CPU veya CUDA motoruna geçin.
+
+Kalıcı server başlatılamazsa PrimeDictate otomatik CLI fallback kullanır ve tanılama günlüğüne uyarı yazar. Performansı kontrol etmek için günlükte `Persistent Vulkan transcription server is ready` ve `Dictation stop-to-result latency=...` satırlarını arayın.
 
 ### Bulut isteği başarısız
 
