@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 import numpy as np
 from src.config import STT_LANGUAGES, config_manager
@@ -24,6 +25,9 @@ class EngineManager:
         self.current_backend = None
         self.last_transcription_info = {}
         self.last_error = None
+        self._warmup_thread = None
+        self._warmup_ready = threading.Event()
+        self._warmup_ready.set()
 
     def get_engine(self, backend: str):
         if backend not in self.engines:
@@ -47,12 +51,49 @@ class EngineManager:
                     logger.exception("Could not close transcription engine cleanly.")
         self.engines.clear()
 
+    def start_warmup(self):
+        backend = config_manager.get("stt_backend", "cpu")
+        if backend == "cloud":
+            self._warmup_ready.set()
+            return
+        if self._warmup_thread and self._warmup_thread.is_alive():
+            return
+        model_size = config_manager.get("model_size", "base")
+        language = _validated_language(config_manager.get("language", "tr"))
+        self._warmup_ready.clear()
+
+        def worker():
+            started = time.perf_counter()
+            try:
+                engine = self.get_engine(backend)
+                engine.load_model(model_size, language)
+                warmup = getattr(engine, "warmup", None)
+                if callable(warmup):
+                    warmup()
+                logger.info(
+                    "Transcription engine warmup completed backend=%s seconds=%.3f.",
+                    backend,
+                    time.perf_counter() - started,
+                )
+            except Exception:
+                logger.exception("Transcription engine warmup failed; first dictation will retry normally.")
+            finally:
+                self._warmup_ready.set()
+
+        self._warmup_thread = threading.Thread(
+            target=worker,
+            daemon=True,
+            name="EngineWarmup",
+        )
+        self._warmup_thread.start()
+
     def process_audio(self, audio: np.ndarray, sample_rate: int = 16000, language_override: str = None, cancel_check=None, apply_text_processing: bool = True) -> str:
         if len(audio) == 0:
             return ""
         if cancel_check and cancel_check():
             raise TranscriptionCancelled()
         self.last_error = None
+        self._warmup_ready.wait(timeout=30)
 
         backend = config_manager.get("stt_backend", "cpu")
         model_size = config_manager.get("model_size", "base")

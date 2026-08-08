@@ -2,13 +2,17 @@ import logging
 import hashlib
 import os
 import re
+import secrets
 import shutil
+import socket
 import subprocess
 import tempfile
+import threading
 import time
 
 import numpy as np
 import soundfile as sf
+import requests
 
 from src.config import APP_DIR, config_manager, get_resource_path
 from src.engine.model_manager import model_manager
@@ -31,6 +35,11 @@ class VulkanSTTEngine(BaseSTTEngine):
         self.last_inference_device = None
         self._runtime_verified_at = 0.0
         self._verified_executable = None
+        self._server_process = None
+        self._server_model_path = None
+        self._server_url = None
+        self._server_session = requests.Session()
+        self._server_lock = threading.RLock()
 
     def _ensure_runtime_available(self, executable: str, max_age_seconds: float = 30.0):
         now = time.monotonic()
@@ -59,6 +68,101 @@ class VulkanSTTEngine(BaseSTTEngine):
             (os.path.abspath(path) for path in candidates if path and os.path.isfile(path)),
             None,
         )
+
+    @staticmethod
+    def find_server_executable(cli_executable: str = None):
+        # The server must come from the exact same runtime directory as the
+        # already verified CLI and DLL set; never mix independently found ABIs.
+        candidates = []
+        if cli_executable and os.path.isabs(cli_executable):
+            candidates.append(os.path.join(os.path.dirname(cli_executable), "whisper-server.exe"))
+        return next(
+            (os.path.abspath(path) for path in candidates if path and os.path.isfile(path)),
+            None,
+        )
+
+    @staticmethod
+    def _reserve_loopback_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            return int(listener.getsockname()[1])
+
+    def _stop_server(self):
+        with self._server_lock:
+            process = self._server_process
+            self._server_process = None
+            self._server_model_path = None
+            self._server_url = None
+            if process is not None and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+
+    def close(self):
+        self._stop_server()
+        self._server_session.close()
+
+    def _ensure_server(self) -> bool:
+        with self._server_lock:
+            return self._ensure_server_locked()
+
+    def _ensure_server_locked(self) -> bool:
+        server_executable = self.find_server_executable(self.executable)
+        if not server_executable:
+            return False
+        if (
+            self._server_process is not None
+            and self._server_process.poll() is None
+            and self._server_model_path == self.model_path
+            and self._server_url
+        ):
+            return True
+
+        self._stop_server()
+        port = self._reserve_loopback_port()
+        secret_path = "/pd-" + secrets.token_urlsafe(18)
+        base_url = f"http://127.0.0.1:{port}{secret_path}"
+        command = [
+            server_executable,
+            "--model", self.model_path,
+            "--host", "127.0.0.1",
+            "--port", str(port),
+            "--request-path", secret_path,
+            "--beam-size", str(self._beam_size()),
+            "--best-of", str(self._beam_size()),
+            "--no-timestamps",
+            "--flash-attn",
+        ]
+        self._server_process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        self._server_model_path = self.model_path
+        self._server_url = base_url
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if self._server_process.poll() is not None:
+                break
+            try:
+                response = self._server_session.get(base_url + "/health", timeout=(0.2, 0.5))
+                if response.status_code == 200:
+                    logger.info("Persistent Vulkan transcription server is ready on loopback.")
+                    return True
+            except requests.RequestException:
+                pass
+            time.sleep(0.05)
+        self._stop_server()
+        logger.warning("Persistent Vulkan server could not start; using one-shot CLI fallback.")
+        return False
+
+    def warmup(self):
+        return self._ensure_server()
 
     @classmethod
     def runtime_status(cls, candidate_path: str = None):
@@ -146,6 +250,52 @@ class VulkanSTTEngine(BaseSTTEngine):
             self.load_model(config_manager.get("model_size", "base"), language)
         else:
             self._ensure_runtime_available(self.executable)
+
+        if self._ensure_server():
+            try:
+                return self._transcribe_with_server(audio, sample_rate, language, cancel_check)
+            except TranscriptionCancelled:
+                raise
+            except Exception as error:
+                logger.warning(
+                    "Persistent Vulkan request failed (%s); restarting with CLI fallback.",
+                    type(error).__name__,
+                )
+                self._stop_server()
+
+        return self._transcribe_with_cli(audio, sample_rate, language, cancel_check)
+
+    def _transcribe_with_server(self, audio, sample_rate, language, cancel_check=None) -> str:
+        if cancel_check and cancel_check():
+            raise TranscriptionCancelled()
+        buffer = tempfile.SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
+        try:
+            sf.write(buffer, audio.astype(np.float32, copy=False), sample_rate, format="WAV", subtype="PCM_16")
+            buffer.seek(0)
+            response = self._server_session.post(
+                self._server_url + "/inference",
+                files={"file": ("audio.wav", buffer, "audio/wav")},
+                data={
+                    "language": language if language != "auto" else "auto",
+                    "response_format": "json",
+                },
+                timeout=(2, 120),
+            )
+        finally:
+            buffer.close()
+        if cancel_check and cancel_check():
+            raise TranscriptionCancelled()
+        response.raise_for_status()
+        text = str(response.json().get("text", "")).strip()
+        if not self.last_inference_device:
+            device_name = type(self)._status_cache_value or "persistent server"
+            self.last_inference_device = f"Vulkan GPU • {device_name}"
+        self.last_detected_language = None if language == "auto" else language
+        self.last_language_probability = None
+        logger.info("Persistent Vulkan transcription completed (%d characters).", len(text))
+        return text
+
+    def _transcribe_with_cli(self, audio, sample_rate, language, cancel_check=None) -> str:
 
         with tempfile.TemporaryDirectory(prefix="primedictate-vulkan-") as temp_dir:
             audio_path = os.path.join(temp_dir, "audio.wav")

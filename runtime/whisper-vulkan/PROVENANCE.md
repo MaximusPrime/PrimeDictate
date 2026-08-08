@@ -20,7 +20,7 @@ This directory contains the pinned whisper.cpp runtime distributed with PrimeDic
 | Vulkan SDK | `1.4.350` |
 | Required build option | `GGML_VULKAN=ON` |
 
-The recorded build metadata states that the binaries were built locally from the pinned upstream source. A complete reproducible build script and signed build log are not included in this repository, so the compiler and SDK details are provenance records rather than independently reproducible proof. PrimeDictate inspects the CLI runtime for Vulkan backend indicators before reporting it as available.
+The CLI and shared libraries were built locally from the pinned upstream source. `whisper-server.exe` was reproduced from the same pinned commit with CMake, MSVC x64, `GGML_VULKAN=ON`, and the server example target enabled. PrimeDictate inspects the CLI runtime for Vulkan backend indicators before reporting it as available.
 
 ## Integrity Verification
 
@@ -30,4 +30,4 @@ Verification protects against accidental corruption and unexpected file replacem
 
 ## Runtime Files
 
-The directory includes the whisper.cpp CLI and its required GGML/Vulkan dynamic libraries. Model weights are not bundled here; compatible GGML models are managed separately in the current user's PrimeDictate model directory.
+The directory includes the whisper.cpp CLI, the loopback-only persistent server, and their required GGML/Vulkan dynamic libraries. Model weights are not bundled here; compatible GGML models are managed separately in the current user's PrimeDictate model directory.

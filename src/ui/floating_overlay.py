@@ -179,6 +179,8 @@ class FloatingOverlay(QWidget):
         self.setFixedSize(186, 46)
         self.drag_position = QPoint()
         self._has_saved_position = False
+        self._recording_active = False
+        self._processing_active = False
 
         self._setup_ui()
         self._load_position()
@@ -226,6 +228,12 @@ class FloatingOverlay(QWidget):
         self.visualizer.setFixedSize(60, 20)
         self.visualizer.setAttribute(Qt.WA_TransparentForMouseEvents)
 
+        self.status_label = QLabel(translate("overlay.status.ready"))
+        self.status_label.setFixedSize(60, 22)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("color:#c8d0da; font-size:10px; font-weight:600;")
+        self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+
         self.play_button = OverlayPlayButton()
         self.play_button.setToolTip(translate("overlay.start_dictation"))
         self.play_button.clicked.connect(self._request_start)
@@ -241,6 +249,7 @@ class FloatingOverlay(QWidget):
 
         container_layout.addWidget(self.logo_label)
         container_layout.addWidget(self.visualizer)
+        container_layout.addWidget(self.status_label)
         container_layout.addWidget(self.play_button)
         container_layout.addWidget(self.stop_button)
         container_layout.addWidget(self.drag_grip)
@@ -288,13 +297,32 @@ class FloatingOverlay(QWidget):
         super().showEvent(event)
 
     def set_status(self, text: str, color_hex: str = "#edf0f3"):
-        pass
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(
+            f"color:{color_hex}; font-size:10px; font-weight:600;"
+        )
+        self.status_label.setToolTip(text)
 
     def set_recording_active(self, active: bool):
+        self._recording_active = active
+        if active:
+            self._processing_active = False
+        self.visualizer.setVisible(active)
+        self.status_label.setVisible(not active)
         self.stop_button.setVisible(active)
         self.stop_button.setEnabled(active)
         self.play_button.setVisible(not active)
-        self.play_button.setEnabled(not active)
+        self.play_button.setEnabled(not active and not self._processing_active)
+
+    def set_processing_active(self, active: bool):
+        self._processing_active = active
+        if active:
+            self._recording_active = False
+        self.visualizer.setVisible(self._recording_active)
+        self.status_label.setVisible(not self._recording_active)
+        self.stop_button.setVisible(self._recording_active)
+        self.play_button.setVisible(not self._recording_active)
+        self.play_button.setEnabled(not active and not self._recording_active)
 
     def _request_start(self):
         if self.start_callback and self.play_button.isEnabled():

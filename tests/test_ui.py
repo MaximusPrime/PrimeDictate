@@ -423,7 +423,20 @@ class UIStructureTests(unittest.TestCase):
 
         controller._finish_dictation_operation.assert_called_once_with()
         controller._set_state.assert_called_once()
-        self.assertEqual(controller._set_state.call_args.args[0].value, "success")
+        self.assertEqual(controller._set_state.call_args.args[0].value, "idle")
+
+    def test_overlay_processing_state_is_visible_and_blocks_start(self):
+        callback = Mock()
+        overlay = FloatingOverlay(start_callback=callback)
+        overlay.set_status("Metne çevriliyor", "#f59e0b")
+        overlay.set_processing_active(True)
+
+        self.assertFalse(overlay.status_label.isHidden())
+        self.assertEqual(overlay.status_label.text(), "Metne çevriliyor")
+        self.assertFalse(overlay.play_button.isEnabled())
+        overlay.play_button.click()
+        callback.assert_not_called()
+        overlay.close()
 
     def test_studio_logo_is_declared_in_all_build_paths(self):
         root = Path(__file__).resolve().parents[1]

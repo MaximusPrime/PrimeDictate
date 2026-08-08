@@ -90,6 +90,7 @@ class PrimeDictateApp(QObject):
 
         self._connect_signals()
         self.reload_settings()
+        self.engine_manager.start_warmup()
 
     def _connect_signals(self):
         self.signals.recording_started.connect(self._on_recording_started)
@@ -188,7 +189,7 @@ class PrimeDictateApp(QObject):
         self._dictation_stopped_at = time.perf_counter()
         self._set_state(AppState.TRANSCRIBING, translate("status.transcribing"))
         if config_manager.get("overlay_enabled", True):
-            self.overlay.set_recording_active(False)
+            self.overlay.set_processing_active(True)
             self.overlay.set_status(translate("overlay.status.transcribing"), "#f59e0b")
 
         # Stream finalization, concatenation and resampling can be expensive.
@@ -254,7 +255,9 @@ class PrimeDictateApp(QObject):
         processing_info = self.engine_manager.last_transcription_info.get("text_processing", {})
         if processing_info.get("fallback_used"):
             result_message = f"{result_message} • {translate('status.cleanup_fallback_used')}"
-        self._set_state(AppState.SUCCESS, result_message)
+        # The result is already available; do not impose an artificial success
+        # cooldown before accepting the next dictation.
+        self._set_state(AppState.IDLE, result_message)
 
         try:
             self.main_window.add_history_entry(text)
@@ -266,11 +269,12 @@ class PrimeDictateApp(QObject):
             logger.exception("Could not refresh transcription metadata after a successful dictation.")
 
         if config_manager.get("overlay_enabled", True):
+            self.overlay.set_processing_active(False)
             self.overlay.set_status(result_message, "#10b981")
             if config_manager.get("overlay_always_on", False):
-                QTimer.singleShot(1800, lambda: (self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3"), self.overlay.set_recording_active(False)))
+                QTimer.singleShot(1800, self._settle_overlay_if_idle)
             else:
-                QTimer.singleShot(1500, self.overlay.hide)
+                QTimer.singleShot(1500, self._hide_overlay_if_idle)
 
     @Slot(float)
     def _on_audio_level(self, level: float):
@@ -303,6 +307,16 @@ class PrimeDictateApp(QObject):
             )
         if state == AppState.SUCCESS:
             QTimer.singleShot(1500, lambda: self._set_state(AppState.IDLE, translate("status.ready")))
+
+    def _settle_overlay_if_idle(self):
+        if self.state == AppState.IDLE:
+            self.overlay.set_processing_active(False)
+            self.overlay.set_recording_active(False)
+            self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3")
+
+    def _hide_overlay_if_idle(self):
+        if self.state == AppState.IDLE:
+            self.overlay.hide()
 
     def _finish_dictation_operation(self):
         if self._dictation_stopped_at is not None:
