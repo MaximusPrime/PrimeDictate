@@ -67,6 +67,43 @@ class EngineManager:
         if callable(unload):
             unload()
 
+    def apply_stt_configuration(self, previous_backend: str = None, previous_model: str = None):
+        """Reconcile resident local engines after the saved STT selection changes."""
+        backend = config_manager.get("stt_backend", "cpu")
+        model = config_manager.get("model_size", "base")
+
+        for engine_backend in ("cuda", "vulkan"):
+            engine = self.engines.get(engine_backend)
+            if engine is None:
+                continue
+            resident_model = getattr(engine, "model_name", None)
+            selection_changed = engine_backend != backend or resident_model != model
+            if selection_changed:
+                unload = getattr(engine, "unload_model", None)
+                if callable(unload):
+                    unload()
+
+        active_warmup = self._warmup_thread
+        if active_warmup and active_warmup.is_alive():
+            # A startup warmup cannot be cancelled while its native model loader
+            # is running. Reconcile once more when it exits so it cannot restore
+            # the model/backend that the user just replaced.
+            def reconcile_after_warmup():
+                active_warmup.join()
+                self.apply_stt_configuration(previous_backend, previous_model)
+
+            threading.Thread(
+                target=reconcile_after_warmup,
+                daemon=True,
+                name="EngineConfigurationReconcile",
+            ).start()
+            return
+
+        if backend in {"cuda", "vulkan"} and (
+            backend != previous_backend or model != previous_model
+        ):
+            self.start_warmup()
+
     def load_selected_model(self, backend: str = None):
         backend = backend or config_manager.get("stt_backend", "cpu")
         if backend not in {"cuda", "vulkan"}:

@@ -1954,6 +1954,8 @@ class MainWindow(QMainWindow):
 
     def save_ui_settings(self):
         completing_setup_flow = self._setup_flow_active
+        previous_backend = config_manager.get("stt_backend", "cpu")
+        previous_model = config_manager.get("model_size", "base")
         provider = self.ai_provider_combo.currentData()
         backend = self.backend_combo.currentData()
         cloud_provider = self.cloud_stt_combo.currentData()
@@ -2045,6 +2047,7 @@ class MainWindow(QMainWindow):
         self._apply_ui_font_size(settings["ui_font_size"])
         if self.app_controller:
             self.app_controller.reload_settings()
+        self.engine_manager.apply_stt_configuration(previous_backend, previous_model)
 
         self._apply_ui_language()
         self._refresh_dashboard()

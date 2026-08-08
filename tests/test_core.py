@@ -638,6 +638,47 @@ class VulkanSTTTests(unittest.TestCase):
 
 
 class EngineFallbackTests(unittest.TestCase):
+    def test_switching_to_cpu_releases_resident_gpu_models(self):
+        manager = EngineManager()
+        cuda_engine = Mock(model_name="base")
+        vulkan_engine = Mock(model_name="small")
+        manager.engines = {"cuda": cuda_engine, "vulkan": vulkan_engine}
+
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: {"stt_backend": "cpu", "model_size": "base"}.get(key, default)):
+            manager.apply_stt_configuration("vulkan", "small")
+
+        cuda_engine.unload_model.assert_called_once_with()
+        vulkan_engine.unload_model.assert_called_once_with()
+
+    def test_changing_vulkan_model_restarts_warmup_with_vram_released(self):
+        manager = EngineManager()
+        vulkan_engine = Mock(model_name="base")
+        manager.engines = {"vulkan": vulkan_engine}
+
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: {"stt_backend": "vulkan", "model_size": "small"}.get(key, default)), \
+             patch.object(manager, "start_warmup") as warmup:
+            manager.apply_stt_configuration("vulkan", "base")
+
+        vulkan_engine.unload_model.assert_called_once_with()
+        warmup.assert_called_once_with()
+
+    def test_backend_change_is_reconciled_again_after_active_warmup(self):
+        manager = EngineManager()
+        gpu_engine = Mock(model_name="base")
+        manager.engines = {"vulkan": gpu_engine}
+        active_warmup = Mock()
+        active_warmup.is_alive.side_effect = [True, False]
+        manager._warmup_thread = active_warmup
+
+        values = {"stt_backend": "cpu", "model_size": "base"}
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("src.engine.engine_manager.threading.Thread") as thread:
+            thread.return_value.start.side_effect = lambda: thread.call_args.kwargs["target"]()
+            manager.apply_stt_configuration("vulkan", "base")
+
+        active_warmup.join.assert_called_once_with()
+        self.assertEqual(gpu_engine.unload_model.call_count, 2)
+
     def test_text_processing_failure_never_reuploads_audio_as_stt_fallback(self):
         manager = EngineManager()
         local_engine = Mock()
