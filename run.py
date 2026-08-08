@@ -270,7 +270,8 @@ class PrimeDictateApp(QObject):
 
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_processing_active(False)
-            self.overlay.set_status(result_message, "#10b981")
+            overlay_result = translate("overlay.status.pasted" if pasted else "overlay.status.copied")
+            self.overlay.set_status(overlay_result, "#10b981", tooltip_text=result_message)
             if config_manager.get("overlay_always_on", False):
                 QTimer.singleShot(1800, self._settle_overlay_if_idle)
             else:
@@ -289,7 +290,7 @@ class PrimeDictateApp(QObject):
             return
         self._set_state(AppState.ERROR, msg)
         if config_manager.get("overlay_enabled", True):
-            self.overlay.set_status(msg, color_hex)
+            self.overlay.set_status(translate("overlay.status.error"), color_hex, tooltip_text=msg)
             if config_manager.get("overlay_always_on", False):
                 QTimer.singleShot(1800, lambda: (self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3"), self.overlay.set_recording_active(False)))
             else:

@@ -383,7 +383,7 @@ class UIStructureTests(unittest.TestCase):
             overlay = FloatingOverlay()
         screen_geometry = overlay._target_screen(QPoint(0, 0)).availableGeometry()
         self.assertTrue(screen_geometry.adjusted(0, 0, -overlay.width(), -overlay.height()).contains(overlay.pos()))
-        self.assertEqual(overlay.size().width(), 186)
+        self.assertEqual(overlay.size().width(), 218)
         self.assertEqual(overlay.size().height(), 46)
         overlay.close()
 
@@ -436,6 +436,16 @@ class UIStructureTests(unittest.TestCase):
         self.assertFalse(overlay.play_button.isEnabled())
         overlay.play_button.click()
         callback.assert_not_called()
+        overlay.close()
+
+    def test_overlay_long_status_wraps_and_keeps_detailed_tooltip(self):
+        overlay = FloatingOverlay()
+        overlay.set_status("Panoya Kopyalandı", "#10b981", tooltip_text="Metin panoya kopyalandı")
+
+        self.assertTrue(overlay.status_label.wordWrap())
+        self.assertEqual(overlay.status_label.text(), "Panoya Kopyalandı")
+        self.assertEqual(overlay.status_label.toolTip(), "Metin panoya kopyalandı")
+        self.assertEqual(overlay.width(), 218)
         overlay.close()
 
     def test_studio_logo_is_declared_in_all_build_paths(self):

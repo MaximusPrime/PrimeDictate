@@ -176,7 +176,7 @@ class FloatingOverlay(QWidget):
             | Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(186, 46)
+        self.setFixedSize(218, 46)
         self.drag_position = QPoint()
         self._has_saved_position = False
         self._recording_active = False
@@ -229,9 +229,10 @@ class FloatingOverlay(QWidget):
         self.visualizer.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         self.status_label = QLabel(translate("overlay.status.ready"))
-        self.status_label.setFixedSize(60, 22)
+        self.status_label.setFixedSize(92, 34)
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("color:#c8d0da; font-size:10px; font-weight:600;")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color:#c8d0da; font-size:9px; font-weight:600;")
         self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         self.play_button = OverlayPlayButton()
@@ -296,12 +297,12 @@ class FloatingOverlay(QWidget):
             self.move(self._clamped_position(self.pos()))
         super().showEvent(event)
 
-    def set_status(self, text: str, color_hex: str = "#edf0f3"):
+    def set_status(self, text: str, color_hex: str = "#edf0f3", tooltip_text: str = None):
         self.status_label.setText(text)
         self.status_label.setStyleSheet(
-            f"color:{color_hex}; font-size:10px; font-weight:600;"
+            f"color:{color_hex}; font-size:9px; font-weight:600;"
         )
-        self.status_label.setToolTip(text)
+        self.status_label.setToolTip(tooltip_text or text)
 
     def set_recording_active(self, active: bool):
         self._recording_active = active
