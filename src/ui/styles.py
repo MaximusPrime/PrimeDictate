@@ -312,9 +312,8 @@ QComboBox QAbstractItemView::item:selected, QComboBox QAbstractItemView::item:ho
     border: none;
     outline: none;
 }}
-QCheckBox {{ spacing: 9px; color: #c8cfd7; }}
-QCheckBox:focus {{ color: #ffffff; }}
-QCheckBox:focus::indicator {{ border: 2px solid #d8bf83; }}
+QCheckBox {{ spacing: 9px; color: #c8cfd7; outline: none; border: none; }}
+QCheckBox:focus {{ color: #ffffff; outline: none; border: none; }}
 QCheckBox::indicator {{
     width: 16px;
     height: 16px;

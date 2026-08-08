@@ -1,14 +1,15 @@
 import ast
 import os
 from pathlib import Path
-from pathlib import Path
+import threading
+import time
 import unittest
 import string
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QObject, QPoint, QThread, Slot
 from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication
 
@@ -16,9 +17,42 @@ from src.i18n import EN, MESSAGES, set_language, translate
 from src.ui.floating_overlay import FloatingOverlay
 from src.ui.main_window import MainWindow
 from src.ui.tray_icon import SystemTrayManager
+from run import AppSignals, PrimeDictateApp
 
 
 class UIStructureTests(unittest.TestCase):
+    def test_worker_completion_signal_is_queued_to_gui_thread(self):
+        app = QApplication.instance() or QApplication([])
+        delivered = threading.Event()
+        receiver_threads = []
+
+        class TestController(PrimeDictateApp):
+            @Slot(str)
+            def receive(self, _text):
+                receiver_threads.append(QThread.currentThread())
+                delivered.set()
+
+        controller = TestController.__new__(TestController)
+        QObject.__init__(controller)
+        signals = AppSignals(controller)
+        signals.transcription_complete.connect(controller.receive)
+
+        worker = threading.Thread(target=lambda: signals.transcription_complete.emit("ready"))
+        worker.start()
+        worker.join(timeout=2)
+        deadline = time.monotonic() + 2
+        while not delivered.is_set() and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+
+        self.assertTrue(delivered.is_set())
+        self.assertIs(receiver_threads[0], app.thread())
+
+    def test_checkbox_style_does_not_draw_outer_focus_border(self):
+        style_source = (Path(__file__).resolve().parents[1] / "src" / "ui" / "styles.py").read_text(encoding="utf-8")
+        self.assertIn("QCheckBox {{ spacing: 9px; color: #c8cfd7; outline: none; border: none; }}", style_source)
+        self.assertNotIn("QCheckBox:focus::indicator", style_source)
+
     def test_stable_translation_keys_have_both_languages(self):
         self.assertTrue(MESSAGES)
         for key, translations in MESSAGES.items():

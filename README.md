@@ -45,7 +45,7 @@ PrimeDictate records from a global hotkey, transcribes with the selected local o
 Floating dictation control:
 
 <p align="center">
-  <img src="docs/images/primedictate-floating-overlay.png" alt="Floating dictation overlay" width="360">
+  <img src="docs/images/primedictate-floating-overlay.png" alt="Floating dictation overlay" width="180">
 </p>
 
 ## How the Pipeline Works

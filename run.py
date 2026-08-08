@@ -4,7 +4,7 @@ import winsound
 import threading
 import logging
 from enum import Enum
-from PySide6.QtCore import QObject, Signal, QTimer, QLockFile, Qt
+from PySide6.QtCore import QObject, Signal, Slot, QTimer, QLockFile, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon, QGuiApplication
 
@@ -42,7 +42,7 @@ class AppSignals(QObject):
     status_changed = Signal(str, str)
     recording_limit_reached = Signal()
 
-class PrimeDictateApp:
+class PrimeDictateApp(QObject):
     def __init__(self):
         set_language(config_manager.get("ui_language", "tr"))
         try:
@@ -52,6 +52,10 @@ class PrimeDictateApp:
         except Exception:
             pass
         self.app = QApplication(sys.argv)
+        # Initialize the QObject only after QApplication exists. This gives
+        # worker-originated signals a main-thread receiver context, so Qt
+        # queues UI callbacks and timers onto the GUI event loop.
+        super().__init__()
         self.app.setQuitOnLastWindowClosed(False)
         self.instance_lock = QLockFile(os.path.join(APP_DIR, "PrimeDictate.lock"))
         if not self.instance_lock.tryLock(100):
@@ -61,7 +65,7 @@ class PrimeDictateApp:
         if os.path.exists(LOGO_PATH):
             self.app.setWindowIcon(QIcon(LOGO_PATH))
 
-        self.signals = AppSignals()
+        self.signals = AppSignals(self)
         self.recorder = AudioRecorder()
         self.engine_manager = engine_manager
         self.operation_coordinator = OperationCoordinator()
@@ -132,6 +136,7 @@ class PrimeDictateApp:
     def stop_dictation(self):
         self.signals.recording_stopped.emit()
 
+    @Slot()
     def _on_recording_started(self):
         if self.state != AppState.IDLE:
             return
@@ -169,6 +174,7 @@ class PrimeDictateApp:
             self.overlay.set_status(translate("overlay.status.listening"), "#38bdf8")
             self.overlay.show()
 
+    @Slot()
     def _on_recording_stopped(self):
         if self.state != AppState.RECORDING or not self.recorder.is_recording:
             return
@@ -189,6 +195,7 @@ class PrimeDictateApp:
         )
         self._processing_thread.start()
 
+    @Slot()
     def _on_recording_limit_reached(self):
         if self.state == AppState.RECORDING:
             self._on_recording_stopped()
@@ -223,6 +230,7 @@ class PrimeDictateApp:
             logger.error(f"Error processing dictation: {e}")
             self.signals.status_changed.emit(translate("error.with_detail", detail=e), "#ef4444")
 
+    @Slot(str)
     def _on_transcription_complete(self, text: str):
         logger.info("Final transcription ready (%d characters).", len(text))
 
@@ -250,11 +258,13 @@ class PrimeDictateApp:
             else:
                 QTimer.singleShot(1500, self.overlay.hide)
 
+    @Slot(float)
     def _on_audio_level(self, level: float):
         if config_manager.get("overlay_enabled", True):
             self.overlay.update_audio_level(level)
         self.main_window.mic_progress.setValue(int(level * 100))
 
+    @Slot(str, str)
     def _on_status_changed(self, msg: str, color_hex: str):
         self.operation_coordinator.finish("dictation")
         self._set_state(AppState.ERROR, msg)
