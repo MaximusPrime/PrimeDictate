@@ -244,16 +244,23 @@ class PrimeDictateApp(QObject):
             restore_clipboard=config_manager.get("restore_clipboard", True),
             target_hwnd=self.target_window,
         )
-
-        # Add to history
-        self.main_window.add_history_entry(text)
-        self.main_window.update_transcription_metadata(self.engine_manager.last_transcription_info)
+        # Release the operation before optional dashboard/history rendering.
+        # A UI refresh failure must never strand dictation in TRANSCRIBING.
         self._finish_dictation_operation()
         result_message = translate("result.pasted" if pasted else "result.copied")
         processing_info = self.engine_manager.last_transcription_info.get("text_processing", {})
         if processing_info.get("fallback_used"):
             result_message = f"{result_message} • {translate('status.cleanup_fallback_used')}"
         self._set_state(AppState.SUCCESS, result_message)
+
+        try:
+            self.main_window.add_history_entry(text)
+        except Exception:
+            logger.exception("Could not refresh transcription history after a successful dictation.")
+        try:
+            self.main_window.update_transcription_metadata(self.engine_manager.last_transcription_info)
+        except Exception:
+            logger.exception("Could not refresh transcription metadata after a successful dictation.")
 
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status(result_message, "#10b981")

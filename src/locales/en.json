@@ -463,6 +463,8 @@
   "privacy.local_fallback": "Local + permitted fallback",
   "recording.error.finalize": "Recording could not be finalized",
   "recording.error.no_audio": "No audio detected",
+  "result.copied": "Text copied to clipboard",
+  "result.pasted": "Text pasted",
   "settings.dialog.save_failed": "Settings Could Not Be Saved",
   "settings.dialog.saved": "Settings saved successfully.",
   "setup.dialog.incomplete": "Setup Could Not Be Completed",

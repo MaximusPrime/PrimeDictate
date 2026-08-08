@@ -298,7 +298,6 @@ class FloatingOverlay(QWidget):
 
     def _request_start(self):
         if self.start_callback and self.play_button.isEnabled():
-            self.play_button.setEnabled(False)
             self.start_callback()
 
     def _request_stop(self):

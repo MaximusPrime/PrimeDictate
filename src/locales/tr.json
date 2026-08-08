@@ -463,6 +463,8 @@
   "privacy.local_fallback": "Yerel + izinli fallback",
   "recording.error.finalize": "Kayıt sonlandırılamadı",
   "recording.error.no_audio": "Ses algılanmadı",
+  "result.copied": "Metin panoya kopyalandı",
+  "result.pasted": "Metin yapıştırıldı",
   "settings.dialog.save_failed": "Ayarlar kaydedilemedi",
   "settings.dialog.saved": "Ayarlar başarıyla kaydedildi.",
   "setup.dialog.incomplete": "Kurulum tamamlanamadı",

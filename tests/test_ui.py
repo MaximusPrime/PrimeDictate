@@ -394,6 +394,35 @@ class UIStructureTests(unittest.TestCase):
         self.assertFalse(overlay.stop_button.isEnabled())
         overlay.close()
 
+    def test_overlay_play_button_stays_enabled_when_start_is_rejected(self):
+        callback = Mock()
+        overlay = FloatingOverlay(start_callback=callback)
+
+        overlay.play_button.click()
+
+        callback.assert_called_once_with()
+        self.assertTrue(overlay.play_button.isEnabled())
+        overlay.close()
+
+    def test_successful_dictation_releases_state_before_history_refresh(self):
+        controller = PrimeDictateApp.__new__(PrimeDictateApp)
+        controller._shutdown_requested = threading.Event()
+        controller.target_window = None
+        controller.main_window = Mock()
+        controller.main_window.add_history_entry.side_effect = RuntimeError("render failed")
+        controller.engine_manager = Mock(last_transcription_info={})
+        controller.overlay = Mock()
+        controller._finish_dictation_operation = Mock()
+        controller._set_state = Mock()
+
+        with patch("run.paste_injector.paste_text", return_value=False), \
+             patch("run.config_manager.get", side_effect=lambda key, default=None: default):
+            controller._on_transcription_complete("örnek")
+
+        controller._finish_dictation_operation.assert_called_once_with()
+        controller._set_state.assert_called_once()
+        self.assertEqual(controller._set_state.call_args.args[0].value, "success")
+
     def test_studio_logo_is_declared_in_all_build_paths(self):
         root = Path(__file__).resolve().parents[1]
         asset = root / "assets" / "maximus-prime-software.png"
