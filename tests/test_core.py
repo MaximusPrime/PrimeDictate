@@ -1,22 +1,137 @@
 import json
+import logging
 import os
 import tempfile
+import threading
+import time
 import unittest
+import zipfile
 from unittest.mock import Mock, patch
 
 import numpy as np
 import soundfile as sf
 
 from src.config import ConfigManager
-from src.engine.ai_cleanup import AICleanupEngine
+from src.engine.ai_cleanup import AICleanupEngine, TextProcessingError
 from src.engine.engine_manager import EngineManager
-from src.engine.file_transcriber import FileTranscribeWorker
-from src.engine.model_manager import ModelManager
+from src.engine.file_transcriber import FileTranscribeWorker, segments_to_json, segments_to_srt, segments_to_vtt
+from src.engine.model_manager import ModelManager, supported_models
 from src.engine.stt_cloud import CloudSTTEngine
 from src.engine.stt_cuda import CUDASTTEngine
 from src.engine.stt_vulkan import VulkanSTTEngine
+from src.engine.provider_catalog import ProviderCatalog
+from src.engine.provider_transport import ProviderRequestCancelled, run_cancellable
+from src.engine.hardware_capabilities import (
+    BackendCapability, preferred_cuda_compute_types, recommended_local_backend,
+)
 from src.engine.stt_base import TranscriptionCancelled
 from src.injector.paste_injector import PasteInjector
+from src.operation_coordinator import OperationCoordinator
+from src.audio.recorder import AudioRecorder
+from src.audio.vad import is_audio_meaningful, trim_silence
+from src.logging_config import SensitiveDataFilter
+from src.diagnostics import create_diagnostics_bundle
+from src.hotkey.listener import HotkeyListener, canonicalize_hotkey
+
+
+class HotkeyListenerTests(unittest.TestCase):
+    @staticmethod
+    def _event(name, event_type):
+        event = Mock()
+        event.name = name
+        event.event_type = event_type
+        return event
+
+    def test_hotkey_validation_requires_safe_complete_combination(self):
+        self.assertEqual(canonicalize_hotkey("ALT + CTRL + D"), "ctrl+alt+d")
+        self.assertEqual(canonicalize_hotkey("f8"), "f8")
+        self.assertEqual(canonicalize_hotkey("d"), "")
+        self.assertEqual(canonicalize_hotkey("ctrl+alt"), "")
+        self.assertEqual(canonicalize_hotkey("ctrl+d+e"), "")
+
+    def test_invalid_saved_hotkey_falls_back_to_safe_default(self):
+        listener = HotkeyListener()
+        with patch("src.hotkey.listener.config_manager.get", side_effect=["d", "invalid-mode"]), \
+             patch("src.hotkey.listener.keyboard.hook", return_value=object()):
+            self.assertTrue(listener.start_listening())
+        self.assertEqual(listener.current_hotkey, "ctrl+alt+d")
+        self.assertEqual(listener.current_mode, "toggle")
+
+    def test_toggle_mode_ignores_key_repeat_and_toggles_after_release(self):
+        started = Mock()
+        stopped = Mock()
+        listener = HotkeyListener(started, stopped)
+        with patch("src.hotkey.listener.keyboard.hook", return_value=object()):
+            self.assertTrue(listener.update_hotkey("ctrl+alt+d", "toggle"))
+
+        for name in ("ctrl", "alt", "d", "d"):
+            listener._on_keyboard_event(self._event(name, "down"))
+        started.assert_called_once_with()
+        stopped.assert_not_called()
+
+        listener._on_keyboard_event(self._event("d", "up"))
+        listener._on_keyboard_event(self._event("d", "down"))
+        stopped.assert_called_once_with()
+
+    def test_hold_mode_starts_on_complete_combo_and_stops_on_release(self):
+        started = Mock()
+        stopped = Mock()
+        listener = HotkeyListener(started, stopped)
+        with patch("src.hotkey.listener.keyboard.hook", return_value=object()):
+            self.assertTrue(listener.update_hotkey("ctrl+shift+space", "hold"))
+
+        for name in ("ctrl", "shift", "space"):
+            listener._on_keyboard_event(self._event(name, "down"))
+        started.assert_called_once_with()
+        listener._on_keyboard_event(self._event("space", "up"))
+        stopped.assert_called_once_with()
+
+
+class LoggingSafetyTests(unittest.TestCase):
+    def test_sensitive_filter_redacts_tokens_and_user_profile(self):
+        secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+        record = logging.LogRecord(
+            "PrimeDictate.Test",
+            logging.ERROR,
+            __file__,
+            1,
+            "api_key=%s Authorization: Bearer %s path=%s",
+            (secret, secret, os.path.join(os.path.expanduser("~"), "private.wav")),
+            None,
+        )
+
+        self.assertTrue(SensitiveDataFilter().filter(record))
+
+        rendered = record.getMessage()
+        self.assertNotIn(secret, rendered)
+        self.assertNotIn(os.path.expanduser("~"), rendered)
+        self.assertIn("[REDACTED]", rendered)
+        self.assertIn("%USERPROFILE%", rendered)
+
+    def test_diagnostics_bundle_excludes_secrets_history_and_transcripts(self):
+        config = Mock()
+        config.get.side_effect = lambda key, default=None: {
+            "stt_backend": "vulkan",
+            "model_size": "small",
+            "api_key_openai": "must-not-appear",
+        }.get(key, default)
+        secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_dir = os.path.join(temp_dir, "logs")
+            os.makedirs(log_dir)
+            with open(os.path.join(log_dir, "PrimeDictate.log"), "w", encoding="utf-8") as log_file:
+                log_file.write(f"Authorization: Bearer {secret}\n")
+            destination = os.path.join(temp_dir, "diagnostics.zip")
+
+            create_diagnostics_bundle(destination, config, log_dir=log_dir)
+
+            with zipfile.ZipFile(destination) as archive:
+                report = json.loads(archive.read("diagnostics.json"))
+                safe_log = archive.read("logs/PrimeDictate.log").decode("utf-8")
+            self.assertNotIn(secret, safe_log)
+            self.assertNotIn("api_key_openai", report["configuration"])
+            self.assertFalse(report["privacy"]["contains_history"])
+            self.assertFalse(report["privacy"]["contains_transcripts"])
 
 
 class CleanupTests(unittest.TestCase):
@@ -60,8 +175,159 @@ class CleanupTests(unittest.TestCase):
         self.assertNotIn("secret-key", output)
         self.assertNotIn("private transcript", output)
 
+    def test_failed_provider_can_return_raw_transcript_with_visible_metadata(self):
+        engine = AICleanupEngine()
+        values = {
+            "ai_cleanup_enabled": True,
+            "ai_cleanup_provider": "openai",
+            "api_key_openai": "secret",
+            "ai_model_openai": "cleanup-model",
+            "cleanup_failure_policy": "raw",
+        }
+        with patch("src.engine.ai_cleanup.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("src.engine.ai_cleanup.config_manager.get_effective_prompt", return_value="cleanup"), \
+             patch.object(engine, "_clean_with_openai_compatible", return_value=None):
+            result = engine.clean_text("ham metin")
+
+        self.assertEqual(result, "ham metin")
+        self.assertTrue(engine.last_processing_info["fallback_used"])
+        self.assertEqual(engine.last_processing_info["fallback_policy"], "raw")
+
+    def test_failed_provider_can_stop_processing(self):
+        engine = AICleanupEngine()
+        values = {
+            "ai_cleanup_enabled": True,
+            "ai_cleanup_provider": "openai",
+            "api_key_openai": "secret",
+            "ai_model_openai": "cleanup-model",
+            "cleanup_failure_policy": "fail",
+        }
+        with patch("src.engine.ai_cleanup.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("src.engine.ai_cleanup.config_manager.get_effective_prompt", return_value="cleanup"), \
+             patch.object(engine, "_clean_with_openai_compatible", return_value=None):
+            with self.assertRaises(TextProcessingError):
+                engine.clean_text("ham metin")
+
+        self.assertTrue(engine.last_processing_info["fallback_used"])
+        self.assertEqual(engine.last_processing_info["fallback_policy"], "fail")
+
+
+class OperationCoordinatorTests(unittest.TestCase):
+    def test_only_one_transcription_operation_can_be_active(self):
+        coordinator = OperationCoordinator()
+
+        self.assertTrue(coordinator.try_begin("file_transcription"))
+        self.assertFalse(coordinator.try_begin("dictation"))
+        self.assertEqual(coordinator.active_operation, "file_transcription")
+
+    def test_only_owner_can_finish_operation(self):
+        coordinator = OperationCoordinator()
+        coordinator.try_begin("dictation")
+
+        self.assertFalse(coordinator.finish("file_transcription"))
+        self.assertEqual(coordinator.active_operation, "dictation")
+        self.assertTrue(coordinator.finish("dictation"))
+        self.assertIsNone(coordinator.active_operation)
+
+
+class AudioRecorderLimitTests(unittest.TestCase):
+    def test_recording_limit_caps_buffer_and_notifies_once(self):
+        recorder = AudioRecorder()
+        recorder.is_recording = True
+        recorder.max_samples = 5
+        recorder.recorded_samples = 0
+        recorder._limit_notified = False
+        limit_callback = Mock()
+        recorder.limit_callback = limit_callback
+
+        recorder._audio_callback(np.ones((4, 1), dtype=np.float32), 4, None, None)
+        recorder._audio_callback(np.ones((4, 1), dtype=np.float32), 4, None, None)
+        recorder._audio_callback(np.ones((4, 1), dtype=np.float32), 4, None, None)
+
+        self.assertEqual(recorder.recorded_samples, 5)
+        self.assertEqual(sum(len(frame) for frame in recorder.frames), 5)
+        limit_callback.assert_called_once_with()
+
+    def test_finalizing_recording_releases_frame_references(self):
+        recorder = AudioRecorder()
+        recorder.is_recording = True
+        recorder.native_sample_rate = 16000
+        recorder.frames = [np.ones((3, 1), dtype=np.float32), np.ones((2, 1), dtype=np.float32)]
+
+        result = recorder.stop_recording()
+
+        self.assertEqual(len(result), 5)
+        self.assertEqual(recorder.frames, [])
+
+    def test_microphone_meter_uses_dbfs_scale(self):
+        recorder = AudioRecorder()
+        recorder.is_recording = True
+        levels = []
+        recorder.level_callback = levels.append
+
+        recorder._audio_callback(np.full((320, 1), 0.01, dtype=np.float32), 320, None, None)
+
+        self.assertEqual(len(levels), 1)
+        self.assertGreater(levels[0], 0.30)
+        self.assertLess(levels[0], 0.45)
+
+
+class AdaptiveVADTests(unittest.TestCase):
+    def test_speech_is_detected_over_steady_room_noise(self):
+        rng = np.random.default_rng(42)
+        noise_before = rng.normal(0, 0.0015, 6400).astype(np.float32)
+        speech = (rng.normal(0, 0.0015, 6400) + 0.025 * np.sin(np.linspace(0, 80, 6400))).astype(np.float32)
+        noise_after = rng.normal(0, 0.0015, 6400).astype(np.float32)
+
+        trimmed = trim_silence(np.concatenate((noise_before, speech, noise_after)))
+
+        self.assertTrue(is_audio_meaningful(trimmed))
+        self.assertGreaterEqual(len(trimmed), len(speech))
+
+    def test_quiet_speech_is_preserved_with_pre_and_post_roll(self):
+        silence = np.zeros(6400, dtype=np.float32)
+        speech = np.full(4800, 0.008, dtype=np.float32)
+        audio = np.concatenate((silence, speech, silence))
+
+        trimmed = trim_silence(audio)
+
+        self.assertTrue(is_audio_meaningful(trimmed))
+        self.assertGreaterEqual(len(trimmed), len(speech) + 6000)
+
+    def test_short_command_is_accepted(self):
+        audio = np.concatenate((
+            np.zeros(1600, dtype=np.float32),
+            np.full(4800, 0.03, dtype=np.float32),
+            np.zeros(1600, dtype=np.float32),
+        ))
+        self.assertTrue(is_audio_meaningful(trim_silence(audio)))
+
+    def test_single_impulse_is_rejected(self):
+        audio = np.zeros(8000, dtype=np.float32)
+        audio[4000:4100] = 0.9
+        self.assertFalse(is_audio_meaningful(trim_silence(audio)))
+
 
 class CloudSTTTests(unittest.TestCase):
+    def test_gemini_error_body_is_not_exposed(self):
+        values = {
+            "cloud_stt_provider": "gemini",
+            "stt_model_gemini": "stt-model",
+            "api_key_gemini": "secret-key",
+        }
+        response = Mock(status_code=400, headers={})
+        response.json.return_value = {"error": {"message": "secret-key private audio detail"}}
+        with patch("src.engine.stt_cloud.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("src.engine.stt_cloud.requests.post", return_value=response), \
+             self.assertLogs("PrimeDictate.STT_Cloud", level="WARNING") as logs:
+            engine = CloudSTTEngine()
+            engine.transcribe(np.zeros(1600, dtype=np.float32))
+
+        output = "\n".join(logs.output)
+        self.assertNotIn("secret-key", output)
+        self.assertNotIn("private audio detail", output)
+        self.assertNotIn("secret-key", engine.last_error)
+
     def test_gemini_uses_independent_stt_model_and_header_key(self):
         values = {
             "cloud_stt_provider": "gemini",
@@ -146,7 +412,90 @@ class CloudSTTTests(unittest.TestCase):
         self.assertNotIn("gsk_", engine.last_error.casefold())
 
 
+class ProviderCatalogTests(unittest.TestCase):
+    def test_gemini_key_is_sent_in_header_and_models_are_discovered(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"models": [{"name": "models/gemini-flash"}]}
+        session = Mock()
+        session.get.return_value = response
+
+        result = ProviderCatalog(session=session).discover("gemini", "secret")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.stt_models, ("gemini-flash",))
+        self.assertNotIn("secret", session.get.call_args.args[0])
+        self.assertEqual(session.get.call_args.kwargs["headers"]["x-goog-api-key"], "secret")
+        self.assertEqual(session.get.call_args.kwargs["timeout"], (5, 15))
+
+    def test_openai_catalog_separates_transcription_models(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"data": [
+            {"id": "gpt-4o-mini-transcribe"},
+            {"id": "gpt-4o-mini"},
+        ]}
+        session = Mock()
+        session.get.return_value = response
+
+        result = ProviderCatalog(session=session).discover("openai", "secret")
+
+        self.assertEqual(result.stt_models, ("gpt-4o-mini-transcribe",))
+        self.assertEqual(result.text_models, ("gpt-4o-mini",))
+
+    def test_provider_error_does_not_include_response_body_or_key(self):
+        response = Mock(status_code=401, text="secret diagnostic body")
+        session = Mock()
+        session.get.return_value = response
+
+        result = ProviderCatalog(session=session).discover("groq", "secret-key")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, "http_401")
+        self.assertEqual(result.failure.code, "authentication")
+        self.assertEqual(result.failure.status_code, 401)
+        self.assertNotIn("secret diagnostic body", repr(result.failure))
+        self.assertNotIn("secret-key", repr(result.failure))
+
+
+class ProviderTransportTests(unittest.TestCase):
+    def test_waiting_provider_request_can_be_cancelled_promptly(self):
+        release_request = threading.Event()
+        cancel = threading.Event()
+        timer = threading.Timer(0.05, cancel.set)
+        timer.start()
+        started = time.monotonic()
+        try:
+            with self.assertRaises(ProviderRequestCancelled):
+                run_cancellable(lambda: release_request.wait(2), cancel.is_set, poll_seconds=0.01)
+        finally:
+            release_request.set()
+            timer.cancel()
+        self.assertLess(time.monotonic() - started, 0.5)
+
+
 class CUDASTTTests(unittest.TestCase):
+    def test_cuda_compute_type_preference_uses_only_supported_types(self):
+        result = preferred_cuda_compute_types({"int8", "float32", "int8_float16"})
+        self.assertEqual(result, ("int8_float16", "int8", "float32"))
+
+    def test_cuda_load_stops_before_model_creation_when_device_is_missing(self):
+        engine = CUDASTTEngine()
+        with patch("src.engine.stt_cuda.detect_cuda_backend", return_value=BackendCapability("cuda", False, "CUDA")), \
+             patch("faster_whisper.WhisperModel") as whisper_model:
+            with self.assertRaisesRegex(RuntimeError, "CUDA"):
+                engine.load_model("base")
+        whisper_model.assert_not_called()
+
+    def test_cuda_load_tries_supported_compute_types_in_order(self):
+        engine = CUDASTTEngine()
+        model = Mock()
+        with patch("src.engine.stt_cuda.detect_cuda_backend", return_value=BackendCapability("cuda", True, "GPU", "float16, int8")), \
+             patch("src.engine.stt_cuda.model_manager.is_model_downloaded", return_value=True), \
+             patch("src.engine.stt_cuda.model_manager.get_model_path", return_value="model"), \
+             patch("faster_whisper.WhisperModel", side_effect=[RuntimeError("fp16"), model]) as whisper_model:
+            engine.load_model("base")
+        self.assertEqual([call.kwargs["compute_type"] for call in whisper_model.call_args_list], ["float16", "int8"])
+        self.assertEqual(engine.last_inference_device, "NVIDIA CUDA GPU 0 • int8")
+
     def test_transcription_failure_is_raised_for_manager_fallback(self):
         engine = CUDASTTEngine()
         engine.model = Mock()
@@ -166,7 +515,11 @@ class VulkanSTTTests(unittest.TestCase):
             output_base = command[command.index("--output-file") + 1]
             with open(output_base + ".txt", "w", encoding="utf-8") as output_file:
                 output_file.write("Vulkan hazır")
-            return Mock(returncode=0, stderr="")
+            return Mock(
+                returncode=0,
+                stdout="",
+                stderr="ggml_vulkan: 0 = Test AMD GPU | fp16: 1\nwhisper_backend_init_gpu: using Vulkan0 backend",
+            )
 
         with patch.object(VulkanSTTEngine, "runtime_status", return_value=(True, "ready")), \
              patch("src.engine.stt_vulkan.subprocess.run", side_effect=complete_process) as run:
@@ -174,8 +527,34 @@ class VulkanSTTTests(unittest.TestCase):
 
         command = run.call_args.args[0]
         self.assertEqual(result, "Vulkan hazır")
+        self.assertEqual(engine.last_inference_device, "Vulkan GPU • Test AMD GPU")
         self.assertEqual(command[command.index("--model") + 1], "ggml-base.bin")
         self.assertIn("--no-timestamps", command)
+        self.assertNotIn("--no-prints", command)
+        self.assertEqual(command[command.index("--beam-size") + 1], "1")
+        self.assertEqual(command[command.index("--best-of") + 1], "1")
+
+    def test_vulkan_beam_size_is_sanitized(self):
+        with patch("src.engine.stt_vulkan.config_manager.get", return_value=99):
+            self.assertEqual(VulkanSTTEngine._beam_size(), 5)
+        with patch("src.engine.stt_vulkan.config_manager.get", return_value="invalid"):
+            self.assertEqual(VulkanSTTEngine._beam_size(), 1)
+
+    def test_vulkan_rejects_unverified_cpu_fallback(self):
+        engine = VulkanSTTEngine()
+        engine.executable = "whisper-cli.exe"
+        engine.model_path = "ggml-base.bin"
+
+        def complete_without_gpu(command, **_):
+            output_base = command[command.index("--output-file") + 1]
+            with open(output_base + ".txt", "w", encoding="utf-8") as output_file:
+                output_file.write("CPU sonucu")
+            return Mock(returncode=0, stdout="", stderr="system_info: CPU only")
+
+        with patch.object(VulkanSTTEngine, "runtime_status", return_value=(True, "ready")), \
+             patch("src.engine.stt_vulkan.subprocess.run", side_effect=complete_without_gpu):
+            with self.assertRaisesRegex(RuntimeError, "GPU"):
+                engine.transcribe(np.zeros(1600, dtype=np.float32))
 
     def test_cached_runtime_status_still_rechecks_integrity(self):
         executable = os.path.abspath("whisper-cli.exe")
@@ -196,6 +575,25 @@ class VulkanSTTTests(unittest.TestCase):
 
 
 class EngineFallbackTests(unittest.TestCase):
+    def test_text_processing_failure_never_reuploads_audio_as_stt_fallback(self):
+        manager = EngineManager()
+        local_engine = Mock()
+        local_engine.transcribe.return_value = "ham metin"
+        manager.get_engine = Mock(return_value=local_engine)
+        values = {
+            "stt_backend": "cpu",
+            "model_size": "base",
+            "language": "tr",
+            "allow_cloud_fallback": True,
+        }
+
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("src.engine.engine_manager.ai_cleanup_engine.clean_text", side_effect=TextProcessingError("cleanup failed")):
+            with self.assertRaises(TextProcessingError):
+                manager.process_audio(np.ones(1600, dtype=np.float32))
+
+        manager.get_engine.assert_called_once_with("cpu")
+
     def test_local_failure_does_not_upload_without_consent(self):
         manager = EngineManager()
         local_engine = Mock()
@@ -290,9 +688,17 @@ class EngineFallbackTests(unittest.TestCase):
         self.assertEqual(result, "hello")
         self.assertEqual(manager.last_transcription_info["detected_language"], "en")
         self.assertEqual(manager.last_transcription_info["language_probability"], 0.96)
+        self.assertEqual(manager.last_transcription_info["audio_seconds"], 0.1)
+        self.assertGreaterEqual(manager.last_transcription_info["transcription_seconds"], 0)
+        self.assertGreaterEqual(manager.last_transcription_info["real_time_factor"], 0)
 
 
 class FileDecodeTests(unittest.TestCase):
+    def test_file_worker_uses_injected_engine(self):
+        injected_engine = Mock()
+        worker = FileTranscribeWorker("sample.wav", engine=injected_engine)
+        self.assertIs(worker.engine, injected_engine)
+
     def test_audio_is_decoded_in_bounded_chunks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = os.path.join(temp_dir, "sample.wav")
@@ -304,8 +710,54 @@ class FileDecodeTests(unittest.TestCase):
 
         self.assertEqual(len(chunks), 2)
         self.assertEqual(len(chunks[0][0]), 30 * 16000)
-        self.assertEqual(sum(len(chunk) for chunk, _ in chunks), len(samples))
+        self.assertEqual(sum(len(chunk) for chunk, _ in chunks), len(samples) + worker.OVERLAP_SECONDS * 16000)
         self.assertTrue(all(10 <= progress <= 92 for _, progress in chunks))
+
+    def test_overlap_text_is_deduplicated(self):
+        merged = FileTranscribeWorker._merge_text_parts([
+            "Bugün ürün planını ayrıntılı biçimde konuşacağız",
+            "ayrıntılı biçimde konuşacağız ve görevleri paylaşacağız.",
+        ])
+        self.assertEqual(
+            merged,
+            "Bugün ürün planını ayrıntılı biçimde konuşacağız ve görevleri paylaşacağız.",
+        )
+
+    def test_timed_segments_remove_overlap_and_export_subtitles(self):
+        worker = FileTranscribeWorker("sample.wav")
+        segments = worker._build_segments(
+            [
+                "ilk bölüm ortak kelimeler",
+                "ortak kelimeler ikinci bölüm",
+            ],
+            [30 * 16000, 4 * 16000],
+        )
+
+        self.assertEqual(segments[0], {"start": 0, "end": 30.0, "text": "ilk bölüm ortak kelimeler"})
+        self.assertEqual(segments[1], {"start": 29, "end": 33.0, "text": "ikinci bölüm"})
+        self.assertIn("00:00:29,000 --> 00:00:33,000", segments_to_srt(segments))
+        self.assertTrue(segments_to_vtt(segments).startswith("WEBVTT\n"))
+        self.assertIn('"text": "ikinci bölüm"', segments_to_json(segments))
+
+    def test_file_cleanup_runs_once_after_all_stt_chunks(self):
+        worker = FileTranscribeWorker("sample.wav")
+        chunks = [(np.zeros(1600, dtype=np.float32), 40), (np.zeros(1600, dtype=np.float32), 80)]
+        finished = []
+        worker.completed.connect(lambda _, text: finished.append(text))
+
+        with patch("src.engine.file_transcriber.os.path.exists", return_value=True), \
+             patch("src.engine.file_transcriber.config_manager.get", return_value="tr"), \
+             patch.object(worker, "_iter_audio_chunks", return_value=chunks), \
+             patch("src.engine.file_transcriber.engine_manager.process_audio", side_effect=["ilk bölüm", "ikinci bölüm"]) as transcribe, \
+             patch("src.engine.file_transcriber.engine_manager.process_text", return_value="tam metin") as cleanup:
+            worker.run()
+
+        self.assertEqual(transcribe.call_count, 2)
+        self.assertTrue(all(call.kwargs["apply_text_processing"] is False for call in transcribe.call_args_list))
+        cleanup.assert_called_once()
+        self.assertEqual(cleanup.call_args.args, ("ilk bölüm ikinci bölüm",))
+        self.assertTrue(callable(cleanup.call_args.kwargs["cancel_check"]))
+        self.assertEqual(finished, ["tam metin"])
 
     def test_auto_language_is_locked_after_first_file_chunk(self):
         worker = FileTranscribeWorker("sample.wav")
@@ -315,7 +767,7 @@ class FileDecodeTests(unittest.TestCase):
         ]
         language_overrides = []
 
-        def process_audio(_, sample_rate=16000, language_override=None, cancel_check=None):
+        def process_audio(_, sample_rate=16000, language_override=None, cancel_check=None, apply_text_processing=True):
             language_overrides.append(language_override)
             if len(language_overrides) == 1:
                 from src.engine.engine_manager import engine_manager
@@ -338,7 +790,7 @@ class FileDecodeTests(unittest.TestCase):
         chunks = [(np.zeros(1600, dtype=np.float32), 40), (np.zeros(1600, dtype=np.float32), 80)]
         language_overrides = []
 
-        def process_audio(_, sample_rate=16000, language_override=None, cancel_check=None):
+        def process_audio(_, sample_rate=16000, language_override=None, cancel_check=None, apply_text_processing=True):
             language_overrides.append(language_override)
             from src.engine.engine_manager import engine_manager
             engine_manager.last_transcription_info = {
@@ -360,7 +812,7 @@ class FileDecodeTests(unittest.TestCase):
         cancelled = []
         finished = []
         worker.cancelled.connect(lambda: cancelled.append(True))
-        worker.finished.connect(lambda *_: finished.append(True))
+        worker.completed.connect(lambda *_: finished.append(True))
         interrupted = {"value": False}
 
         def interrupted_chunks():
@@ -379,15 +831,52 @@ class FileDecodeTests(unittest.TestCase):
 
 
 class ModelStorageTests(unittest.TestCase):
+    def test_backend_model_catalogs_are_independent(self):
+        self.assertIn("large-v3", supported_models("cpu"))
+        self.assertIn("large-v3", supported_models("cuda"))
+        self.assertNotIn("large-v3", supported_models("vulkan"))
+        self.assertTrue(supported_models("vulkan"))
+
     def test_faster_whisper_download_uses_prime_dictate_model_directory(self):
         manager = ModelManager()
+        def create_model(_name, output_dir):
+            for filename in ("config.json", "model.bin", "tokenizer.json"):
+                with open(os.path.join(output_dir, filename), "wb") as model_file:
+                    model_file.write(b"test")
+
         with tempfile.TemporaryDirectory() as temp_dir, \
              patch.object(manager, "get_model_path", return_value=os.path.join(temp_dir, "base")) as model_path, \
-             patch("faster_whisper.utils.download_model") as download:
+             patch("faster_whisper.utils.download_model", side_effect=create_model) as download, \
+             patch.object(manager, "_validate_faster_whisper_model") as validate:
             manager._download_worker("base", "cpu")
 
         model_path.assert_called_once_with("base", "cpu")
-        self.assertEqual(download.call_args.kwargs["output_dir"], os.path.join(temp_dir, "base"))
+        staging_path = download.call_args.kwargs["output_dir"]
+        self.assertNotEqual(staging_path, os.path.join(temp_dir, "base"))
+        validate.assert_called_once_with(staging_path)
+
+    def test_failed_model_validation_preserves_existing_model(self):
+        manager = ModelManager()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = os.path.join(temp_dir, "base")
+            os.makedirs(model_path)
+            marker = os.path.join(model_path, "existing.txt")
+            with open(marker, "w", encoding="utf-8") as model_file:
+                model_file.write("healthy")
+            with patch.object(manager, "get_model_path", return_value=model_path), \
+                 patch("faster_whisper.utils.download_model"), \
+                 patch.object(manager, "_validate_faster_whisper_model", side_effect=RuntimeError("invalid")):
+                manager._download_worker("base", "cpu")
+            self.assertTrue(os.path.isfile(marker))
+
+    def test_zero_byte_model_file_is_not_ready(self):
+        manager = ModelManager()
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(manager, "get_model_path", return_value=temp_dir):
+            for filename in ("config.json", "model.bin", "tokenizer.json"):
+                with open(os.path.join(temp_dir, filename), "wb") as model_file:
+                    model_file.write(b"test")
+            open(os.path.join(temp_dir, "model.bin"), "wb").close()
+            self.assertFalse(manager.is_model_downloaded("base", "cpu"))
 
     def test_local_model_requires_complete_managed_files(self):
         manager = ModelManager()
@@ -399,6 +888,25 @@ class ModelStorageTests(unittest.TestCase):
             os.remove(os.path.join(temp_dir, "model.bin"))
             self.assertFalse(manager.is_model_downloaded("base", "cpu"))
 
+
+class HardwareCapabilityTests(unittest.TestCase):
+    def test_recommendation_prefers_cuda_then_vulkan_then_cpu(self):
+        cpu = BackendCapability("cpu", True, "CPU")
+        vulkan = BackendCapability("vulkan", True, "AMD GPU")
+        cuda = BackendCapability("cuda", True, "NVIDIA GPU")
+        self.assertEqual(recommended_local_backend({"cpu": cpu, "vulkan": vulkan, "cuda": cuda}), "cuda")
+        self.assertEqual(
+            recommended_local_backend({"cpu": cpu, "vulkan": vulkan, "cuda": BackendCapability("cuda", False, "CUDA")}),
+            "vulkan",
+        )
+
+    def test_recommendation_falls_back_to_cpu(self):
+        capabilities = {
+            "cpu": BackendCapability("cpu", True, "CPU"),
+            "vulkan": BackendCapability("vulkan", False, "Vulkan"),
+            "cuda": BackendCapability("cuda", False, "CUDA"),
+        }
+        self.assertEqual(recommended_local_backend(capabilities), "cpu")
 
 class ConfigTests(unittest.TestCase):
     def test_api_credentials_are_not_written_to_json(self):
@@ -417,6 +925,23 @@ class ConfigTests(unittest.TestCase):
 
 
 class PasteSafetyTests(unittest.TestCase):
+    def test_auto_paste_disabled_copies_without_sending_paste_keys(self):
+        injector = PasteInjector()
+        with patch.object(injector, "_safe_copy_to_clipboard", return_value=True) as copy, \
+             patch("src.injector.paste_injector.config_manager.get", return_value=False), \
+             patch.object(injector, "_force_foreground") as force_foreground, \
+             patch.object(injector, "_send_paste_keys") as send_paste_keys:
+            pasted = injector.paste_text(
+                "clipboard only",
+                restore_clipboard=True,
+                target_hwnd=10,
+            )
+
+        self.assertFalse(pasted)
+        copy.assert_called_once_with("clipboard only")
+        force_foreground.assert_not_called()
+        send_paste_keys.assert_not_called()
+
     def test_paste_is_skipped_when_target_focus_cannot_be_restored(self):
         injector = PasteInjector()
         with patch("src.injector.paste_injector.pyperclip.copy"), \

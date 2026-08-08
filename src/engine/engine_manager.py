@@ -1,11 +1,12 @@
 import logging
+import time
 import numpy as np
 from src.config import STT_LANGUAGES, config_manager
 from src.engine.stt_cuda import CUDASTTEngine
 from src.engine.stt_cpu import CPUSTTEngine
 from src.engine.stt_vulkan import VulkanSTTEngine
 from src.engine.stt_cloud import CloudSTTEngine
-from src.engine.ai_cleanup import ai_cleanup_engine
+from src.engine.ai_cleanup import TextProcessingError, ai_cleanup_engine
 from src.engine.stt_base import TranscriptionCancelled
 
 logger = logging.getLogger("PrimeDictate.EngineManager")
@@ -36,7 +37,7 @@ class EngineManager:
                 self.engines[backend] = CPUSTTEngine()
         return self.engines[backend]
 
-    def process_audio(self, audio: np.ndarray, sample_rate: int = 16000, language_override: str = None, cancel_check=None) -> str:
+    def process_audio(self, audio: np.ndarray, sample_rate: int = 16000, language_override: str = None, cancel_check=None, apply_text_processing: bool = True) -> str:
         if len(audio) == 0:
             return ""
         if cancel_check and cancel_check():
@@ -58,8 +59,12 @@ class EngineManager:
             transcribe_args = {"sample_rate": sample_rate, "language": language}
             if cancel_check:
                 transcribe_args["cancel_check"] = cancel_check
+            transcription_started = time.perf_counter()
             raw_text = engine.transcribe(audio, **transcribe_args)
-            self._capture_transcription_info(engine, backend, language)
+            transcription_seconds = time.perf_counter() - transcription_started
+            self._capture_transcription_info(
+                engine, backend, language, transcription_seconds, len(audio) / sample_rate
+            )
 
             if not raw_text or not raw_text.strip():
                 self.last_error = getattr(engine, "last_error", None)
@@ -68,11 +73,13 @@ class EngineManager:
             # Perform AI Cleanup (stutter removal, punctuation, formatting)
             if cancel_check and cancel_check():
                 raise TranscriptionCancelled()
-            final_text = ai_cleanup_engine.clean_text(raw_text)
+            final_text = self._clean_text(raw_text, cancel_check) if apply_text_processing else raw_text.strip()
             if cancel_check and cancel_check():
                 raise TranscriptionCancelled()
             return final_text
         except TranscriptionCancelled:
+            raise
+        except TextProcessingError:
             raise
         except Exception as e:
             logger.error(f"Error in EngineManager processing: {e}")
@@ -84,23 +91,54 @@ class EngineManager:
                     cloud_args = {"sample_rate": sample_rate, "language": language}
                     if cancel_check:
                         cloud_args["cancel_check"] = cancel_check
+                    transcription_started = time.perf_counter()
                     raw_text = cloud_engine.transcribe(audio, **cloud_args)
-                    self._capture_transcription_info(cloud_engine, "cloud", language)
+                    transcription_seconds = time.perf_counter() - transcription_started
+                    self._capture_transcription_info(
+                        cloud_engine, "cloud", language, transcription_seconds, len(audio) / sample_rate
+                    )
                     if not raw_text:
                         self.last_error = getattr(cloud_engine, "last_error", self.last_error)
-                    return ai_cleanup_engine.clean_text(raw_text)
+                    return self._clean_text(raw_text, cancel_check) if apply_text_processing else raw_text.strip()
                 except TranscriptionCancelled:
                     raise
                 except Exception as ex:
                     logger.error(f"Cloud fallback also failed: {ex}")
             return ""
 
-    def _capture_transcription_info(self, engine, backend: str, requested_language: str):
+    def _capture_transcription_info(self, engine, backend: str, requested_language: str, transcription_seconds=None, audio_seconds=None):
+        real_time_factor = None
+        if isinstance(transcription_seconds, (float, int)) and isinstance(audio_seconds, (float, int)) and audio_seconds > 0:
+            real_time_factor = transcription_seconds / audio_seconds
         self.last_transcription_info = {
             "backend": backend,
             "requested_language": requested_language,
             "detected_language": getattr(engine, "last_detected_language", None),
             "language_probability": getattr(engine, "last_language_probability", None),
+            "inference_device": getattr(engine, "last_inference_device", None),
+            "audio_seconds": audio_seconds,
+            "transcription_seconds": transcription_seconds,
+            "real_time_factor": real_time_factor,
         }
+        if real_time_factor is not None:
+            logger.info(
+                "STT performance backend=%s device=%s audio_seconds=%.3f transcription_seconds=%.3f real_time_factor=%.3f",
+                backend,
+                self.last_transcription_info["inference_device"] or "unknown",
+                audio_seconds,
+                transcription_seconds,
+                real_time_factor,
+            )
+
+    def _clean_text(self, raw_text: str, cancel_check=None) -> str:
+        try:
+            return ai_cleanup_engine.clean_text(raw_text, cancel_check=cancel_check)
+        finally:
+            self.last_transcription_info["text_processing"] = dict(
+                getattr(ai_cleanup_engine, "last_processing_info", {})
+            )
+
+    def process_text(self, raw_text: str, cancel_check=None) -> str:
+        return self._clean_text(raw_text, cancel_check)
 
 engine_manager = EngineManager()

@@ -1,208 +1,158 @@
 <p align="center">
-  <img src="assets/PrimeDictate-Logo.png" alt="PrimeDictate logo" width="144">
+  <img src="docs/images/primedictate-readme-logo.png" alt="PrimeDictate logo" width="160">
 </p>
 
 <h1 align="center">PrimeDictate</h1>
 
 <p align="center">
   <strong>Private, system-wide dictation for Windows.</strong><br>
-  Local CPU and GPU transcription, optional cloud STT, and independent text processing in one desktop workflow.
+  Fast local CPU/GPU transcription, optional cloud services, and safe text insertion in one desktop workflow.
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-c4a76e" alt="GPL-3.0 license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-c4a76e" alt="GPL-3.0"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-2563eb" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/python-3.12-3776ab" alt="Python 3.12">
   <img src="https://img.shields.io/badge/UI-PySide6-41cd52" alt="PySide6">
-  <img src="https://img.shields.io/badge/version-1.0.0-64748b" alt="Version 1.0.0">
 </p>
 
-PrimeDictate records speech from a global Windows hotkey, transcribes it with a selected local or cloud engine, optionally processes the transcript, and safely inserts the result into the window that was active when recording began.
+PrimeDictate records from a global hotkey, transcribes with the selected local or cloud engine, optionally cleans or rewrites the result, and safely inserts it into the window that was active when recording started. Speech-to-text and text processing are independent stages: using local STT never requires a cloud text model, and selecting cloud text processing does not upload audio.
 
-It is designed around an explicit two-stage pipeline:
+<p align="center">
+  <img src="docs/images/primedictate-home.png" alt="PrimeDictate home screen" width="920">
+</p>
+
+## Highlights
+
+- System-wide dictation with configurable **Toggle** and **Push-to-Talk (Hold)** modes.
+- Local Whisper on CPU, NVIDIA CUDA, or Vulkan-capable AMD/Intel/NVIDIA GPUs.
+- Separate managed models for faster-whisper (CPU/CUDA) and whisper.cpp GGML (Vulkan).
+- Optional Groq, OpenAI, and Gemini Audio cloud transcription.
+- Optional rule-based cleanup, local Ollama/LM Studio, or cloud LLM processing.
+- Turkish and English interfaces backed by complete, matching locale catalogs.
+- Adaptive voice activity detection, bounded recordings, and background finalization.
+- Chunked, cancellable media transcription with overlap de-duplication and TXT/SRT/VTT/JSON export.
+- Focus-safe paste, clipboard restoration, searchable local history, and a draggable multi-monitor overlay.
+- Credentials in Windows Credential Manager, redacted rotating logs, and privacy-safe diagnostic ZIPs.
+- State-aware system tray controls and single-instance application lifecycle.
+
+## Screenshots
+
+| Speech-to-text and model management | Hotkey and audio settings |
+|---|---|
+| <img src="docs/images/primedictate-speech-to-text.png" alt="Speech-to-text settings" width="590"> | <img src="docs/images/primedictate-hotkey-settings.png" alt="Hotkey settings" width="590"> |
+
+Floating dictation control:
+
+<p align="center">
+  <img src="docs/images/primedictate-floating-overlay.png" alt="Floating dictation overlay" width="360">
+</p>
+
+## How the Pipeline Works
 
 ```text
 Microphone or media file
         |
         v
 1. Speech to Text (required)
-   Local CPU / CUDA / Vulkan, or cloud STT
+   CPU / CUDA / Vulkan / cloud STT
         |
         v
 2. Text Processing (optional)
-   Rule-based cleanup, local LLM, or cloud LLM
+   Rules / local LLM / cloud LLM
         |
         v
-Clipboard injection, history, or file output
+Safe paste / history / file export
 ```
 
-The transcription model and text-processing model are configured independently. Selecting cloud STT does not select a cloud text model, and selecting a cloud text model does not upload audio.
+Cloud fallback is disabled by default and requires explicit consent. When enabled, audio is sent to the configured cloud STT provider only after the chosen local engine fails.
 
-## Highlights
+## Engine Guide
 
-- System-wide dictation with configurable toggle or hold hotkeys.
-- Local Whisper inference on CPU, NVIDIA CUDA, or Vulkan-capable GPUs.
-- Cloud transcription through Groq, OpenAI, or Google Gemini Audio.
-- Searchable Whisper language catalog with 100 languages and automatic detection.
-- Complete Turkish and English application interfaces.
-- Optional rule-based cleanup, Ollama/LM Studio processing, or cloud LLM processing.
-- Cancellable, chunked transcription for common audio and video formats.
-- Multi-monitor-safe recording overlay with remembered drag position.
-- Plain-text clipboard restoration and focus-safe paste behavior.
-- API credentials stored in Windows Credential Manager.
-- Portable and installed editions with the same per-user data model.
-- Live diagnostics for engines, devices, downloads, and provider failures.
-
-## Engine Selection
-
-### Speech-to-text engines
-
-| Engine | Processing location | Primary use | Model selection | Audio leaves device |
-|---|---|---|---|---|
-| Local CPU | This computer | Maximum compatibility and privacy | `tiny` through `large-v3-turbo` | No |
-| NVIDIA CUDA | NVIDIA GPU | Fast local transcription | `tiny` through `large-v3-turbo` | No |
-| Vulkan | AMD, Intel, or NVIDIA GPU | Local GPU acceleration through whisper.cpp | GGML equivalent of selected size | No |
-| Groq STT | Groq infrastructure | Low-latency cloud Whisper | Groq transcription model | Yes |
-| OpenAI STT | OpenAI infrastructure | Managed cloud transcription | OpenAI transcription model | Yes |
-| Gemini Audio | Google infrastructure | Multimodal cloud transcription | Gemini model | Yes |
-
-Local model size is shown only for local engines. When cloud STT is active, PrimeDictate instead displays the selected provider and remote transcription model.
-
-Cloud fallback is opt-in. If enabled, audio may be sent to the configured cloud STT provider only after the selected local engine fails.
-
-### Text-processing methods
-
-| Method | Processing location | Model required | Data sent |
+| Engine | Best fit | Runtime and models | Audio leaves device |
 |---|---|---|---|
-| Rule-based cleanup | This computer | No | Nothing |
-| Ollama / LM Studio | User-configured local endpoint | Yes | Transcript text |
-| Gemini / Grok / Groq / OpenAI | Provider infrastructure | Yes | Transcript text |
+| Local CPU | Compatibility, short dictation, modern fast CPUs | faster-whisper; managed CPU model cache | No |
+| NVIDIA CUDA | Sustained high-throughput local transcription | faster-whisper; managed CUDA model cache | No |
+| Vulkan | AMD/Intel GPU acceleration and supported NVIDIA systems | whisper.cpp; separate GGML models | No |
+| Groq/OpenAI/Gemini STT | Low local resource use or cloud preference | Provider-managed models | Yes |
 
-Text processing is optional. When disabled, the raw STT result is used without cleanup or rewriting.
+CPU and GPU can be changed later in **Speech to Text**; the first-run choice is not permanent. PrimeDictate validates the chosen backend, reports the detected device, and prevents incompatible model/backend combinations.
 
-Available profiles include standard cleanup, formal business writing, technical terminology preservation, English translation, and bullet-point summarization. Profiles and custom instructions apply only to LLM-based processing; the local rule-based method performs basic filler removal, capitalization, spacing, and punctuation.
+CPU may still beat Vulkan for very short recordings when GPU model loading and process startup dominate total time, or when the GPU/driver is weak. A warm Vulkan backend usually becomes more advantageous for longer audio and repeated dictation. CUDA is typically the preferred local route on a supported NVIDIA GPU. Measure with the same audio and model on your own machine; model size, driver, CPU, GPU, and recording length all matter.
 
-## Language Support
+Supported local sizes depend on the runtime. CPU/CUDA use faster-whisper model packages; Vulkan uses compatible whisper.cpp GGML packages and therefore stores a separate copy. `large-v3` is not offered where the bundled Vulkan catalog has no compatible artifact; `large-v3-turbo` is the high-end Vulkan option.
 
-PrimeDictate separates interface language from spoken language:
+## First Run
 
-| Setting | Current support |
-|---|---|
-| Application interface | Turkish and English |
-| Spoken language | 100 Whisper language codes |
-| Automatic language detection | Supported |
+1. Open **Speech to Text** and choose CPU, CUDA, Vulkan, or cloud STT.
+2. For a local engine, choose and download a compatible model.
+3. Select the spoken language or automatic detection.
+4. Optionally configure cleanup or LLM processing under **Text Processing - API**.
+5. In **Settings**, select the microphone, assign a safe global hotkey, and choose Toggle or Hold mode.
+6. Save, focus any text field, and use the configured shortcut.
 
-CPU and CUDA engines can expose detected-language confidence. During file transcription, a detected language is locked only when confidence is at least 60%, so later chunks remain consistent without trusting a weak first guess. Some providers and the Vulkan CLI do not expose confidence metadata; PrimeDictate does not fabricate a confidence value when one is unavailable.
+The default shortcut is `Ctrl+Alt+D`. Ordinary unmodified keys are rejected to prevent accidental global capture; function keys may be assigned alone. Hotkeys are registered live and invalid saved values fall back safely.
+
+## Local Models and Data
+
+Installed and portable editions use the current Windows profile rather than writing personal data beside the executable:
+
+```text
+%APPDATA%\PrimeDictate\
+|-- config.json
+|-- history.json
+|-- logs\PrimeDictate.log
+`-- models\
+    |-- faster-whisper\   CPU/CUDA packages
+    `-- whisper.cpp\      Vulkan GGML packages
+```
+
+API credentials are stored in Windows Credential Manager. Diagnostic bundles redact tokens, provider secrets, and Windows user-profile paths; they do not include transcript history, recordings, or API credentials.
+
+Clipboard insertion remembers the target window before recording and restores focus only when safe. If the target cannot be restored, the result remains on the clipboard instead of being pasted into an unintended window. Plain-text clipboard restoration does not preserve images, file lists, HTML, or other rich formats.
+
+## File Transcription
+
+Supported containers include `.mp3`, `.wav`, `.mp4`, `.m4a`, `.mkv`, `.flac`, and `.ogg`. Long media is decoded incrementally, processed in overlapping bounded chunks, and de-duplicated at chunk boundaries. Jobs can be cancelled; CPU/CUDA stop at safe segment boundaries, Vulkan terminates its active CLI process, and a provider request may first need to return or time out.
+
+Exports include plain text plus timestamp-aware SRT, VTT, and JSON formats.
 
 ## Requirements
 
-### End users
+For packaged releases:
 
-- Windows 10 or Windows 11, 64-bit.
-- A working microphone for live dictation.
-- Sufficient storage for local Whisper models when a local engine is selected.
-- A current compatible driver for CUDA or Vulkan acceleration.
-- Provider credentials only for cloud features selected by the user.
+- Windows 10 or 11, 64-bit.
+- A microphone for live dictation.
+- Current compatible GPU drivers when using CUDA or Vulkan.
+- Enough storage for each selected backend's model files.
 
-### Source development
+For source development: Python 3.12, Git, and Inno Setup 6 when producing the installer.
 
-- Python 3.12.
-- Git.
-- Inno Setup 6 only when producing the Windows setup package.
-
-## Run From Source
+## Run from Source
 
 ```powershell
 git clone https://github.com/MaximusPrime/PrimeDictate.git
 Set-Location PrimeDictate
-
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-
 python run.py
 ```
 
-PrimeDictate prevents multiple application instances for the same Windows user. If the application is already running, open it from the system tray instead of starting a second process.
+Only one PrimeDictate instance runs per Windows user. Use the tray icon to reopen a running instance.
 
-## First-Time Configuration
+## Quality Checks
 
-1. Open **Speech to Text** and select the processing location.
-2. For a local engine, select and download a Whisper model.
-3. For cloud STT, select the provider, remote model, and required API credential.
-4. Select the spoken language or use automatic detection.
-5. Open **Text Processing & API** and decide whether transcript processing should be enabled.
-6. Open **Audio & Shortcuts** to select a microphone, hotkey behavior, and interface language.
-7. Save settings, focus a target application, and use the configured global hotkey.
-
-The default hotkey is `Ctrl+Alt+D` in toggle mode.
-
-For a detailed Turkish walkthrough, see [docs/USER_GUIDE_TR.md](docs/USER_GUIDE_TR.md).
-
-## Local Model Guidance
-
-| Model | Relative speed | Relative memory | Typical use |
-|---|---|---|---|
-| `tiny` | Fastest | Lowest | Short commands and constrained hardware |
-| `base` | Very fast | Low | General lightweight dictation |
-| `small` | Balanced | Moderate | Everyday dictation with improved accuracy |
-| `medium` | Slower | High | Accuracy-focused local transcription |
-| `large-v3-turbo` | Hardware-dependent | Highest | Strong multilingual accuracy on capable systems |
-
-Actual performance depends on the processor, GPU, driver, recording quality, language, and model backend. Model names do not imply identical memory usage across faster-whisper and GGML runtimes.
-
-## Vulkan Runtime
-
-PrimeDictate includes a pinned Windows x64 whisper.cpp runtime built with Vulkan support:
-
-- Upstream release: `v1.9.2`
-- Build option: `GGML_VULKAN=ON`
-- Runtime manifest: `runtime/whisper-vulkan/SHA256SUMS`
-- Provenance: [runtime/whisper-vulkan/PROVENANCE.md](runtime/whisper-vulkan/PROVENANCE.md)
-
-At runtime, PrimeDictate verifies bundled files against the SHA-256 manifest, confirms that the selected CLI exposes the Vulkan backend, and reports the detected Vulkan device. A custom `whisper-cli.exe` can be selected as an advanced override.
-
-Vulkan availability still depends on the installed graphics driver and hardware support. Bundling a Vulkan-enabled runtime does not guarantee that every GPU or driver combination will execute it successfully.
-
-## Privacy and Data Flow
-
-PrimeDictate does not treat “portable” as “store data beside the executable.” Both installed and portable editions use the current Windows user profile:
-
-```text
-%APPDATA%\PrimeDictate\
-|-- config.json       Application settings; no API credentials
-|-- history.json      Optional local transcript history
-`-- models\
-    |-- faster-whisper\   Managed CPU/CUDA models
-    `-- whisper.cpp\      Managed Vulkan GGML models
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q src run.py build.py
+.\.venv\Scripts\python.exe build.py --check
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-API credentials are written to Windows Credential Manager under PrimeDictate-specific credential targets.
+The regression suite covers backend dispatch and device validation, model catalogs, cloud contracts and consent, hotkey Toggle/Hold behavior, localization parity, operation coordination, file chunking/export, clipboard safety, diagnostics, navigation, overlay placement, and package resources. Windows CI runs the same compile, preflight, and test checks.
 
-| Configuration | Audio destination | Transcript destination |
-|---|---|---|
-| Local STT + rule-based cleanup | This computer | This computer |
-| Local STT + local LLM | This computer | Configured local endpoint |
-| Local STT + cloud LLM | This computer | Selected LLM provider |
-| Cloud STT | Selected STT provider | Depends on processing selection |
-| Local STT + cloud fallback | Cloud only after local failure | Depends on processing selection |
-
-Clipboard insertion captures the target window before recording, attempts to restore that focus safely, and pastes with `Ctrl+V`. PrimeDictate can restore the previous plain-text clipboard value; it does not preserve images, copied files, HTML, or other clipboard formats. If focus cannot be restored safely, the result remains on the clipboard instead of being pasted into an unintended window.
-
-## File Transcription
-
-Supported input containers include:
-
-```text
-.mp3  .wav  .mp4  .m4a  .mkv  .flac  .ogg
-```
-
-Media is decoded incrementally and processed in bounded chunks. Cancellation is cooperative: CPU/CUDA stop at segment boundaries, Vulkan terminates its active CLI process, and an in-flight provider HTTP request may need to return before cancellation completes. The selected STT and optional text-processing configuration also applies to file transcription.
-
-## Build
-
-The automated Windows build produces a one-file portable executable, an onedir application, and an installer when Inno Setup is available:
+## Build Windows Packages
 
 ```powershell
 .\.venv\Scripts\python.exe build.py
@@ -213,93 +163,54 @@ Expected outputs:
 ```text
 dist\PrimeDictate-Portable.exe
 dist\PrimeDictate\PrimeDictate.exe
-dist\PrimeDictate-Setup.exe          # when ISCC.exe is available
+dist\PrimeDictate-Setup.exe
 ```
 
-The PyInstaller specs can also be invoked directly:
+The build uses the tracked PyInstaller specifications and validates locale catalogs, assets, metadata, and the bundled Vulkan integrity manifest before packaging. Inno Setup must be installed for `PrimeDictate-Setup.exe`.
 
-```powershell
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean PrimeDictate-Portable.spec
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean PrimeDictate.spec
-```
-
-Build metadata is sourced from `src/metadata.py`. Inno Setup declarations in `installer.iss` must remain synchronized with that canonical metadata.
-
-## Test
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe -m compileall -q src run.py build.py
-```
-
-The suite covers STT dispatch, language validation, cloud request contracts, fallback consent, file chunking, credential persistence, clipboard safety, localization, navigation consistency, overlay positioning, and package resource declarations.
-
-## Architecture
+## Project Layout
 
 ```text
 PrimeDictate/
-|-- run.py                         Application controller and state machine
-|-- build.py                       Windows packaging automation
-|-- installer.iss                  Inno Setup definition
+|-- run.py                       Controller and application state machine
+|-- build.py                     Validation and Windows packaging
+|-- installer.iss                Inno Setup definition
 |-- src/
-|   |-- config.py                  Settings, credentials, prompts, languages
-|   |-- i18n.py                    Turkish and English interface catalog
-|   |-- metadata.py                Canonical product metadata
-|   |-- audio/                     Capture, resampling, and VAD
-|   |-- engine/                    STT, models, file transcription, cleanup
-|   |-- hotkey/                    Global Windows hotkey listener
-|   |-- injector/                  Focus-safe clipboard insertion
-|   `-- ui/                        Main window, overlay, tray, and styling
-|-- runtime/whisper-vulkan/        Pinned Vulkan runtime and provenance
-|-- tests/                          Core and UI regression tests
-`-- docs/                           User and engineering documentation
+|   |-- audio/                   Capture, resampling, adaptive VAD
+|   |-- engine/                  STT, models, providers, file jobs
+|   |-- hotkey/                  Global shortcut listener and validation
+|   |-- injector/                Focus-safe clipboard insertion
+|   |-- locales/                 English and Turkish JSON catalogs
+|   `-- ui/                      Window, pages, tray, overlay, styling
+|-- runtime/whisper-vulkan/      Pinned runtime, hashes, provenance
+|-- tests/                        Core and UI regression tests
+`-- docs/                         Guides, architecture, screenshots
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component contracts and data-flow details.
+See [Architecture](docs/ARCHITECTURE.md) for component contracts and data flow.
 
-## Known Boundaries
+## Verification Boundaries
 
-- PrimeDictate is currently Windows-only.
-- Cloud functionality depends on provider availability, account access, model availability, quotas, and API contract changes.
-- Gemini Audio language guidance is prompt-based rather than a structured Whisper language field.
-- Automatic language confidence is shown only when the active engine exposes it.
-- A successful package build does not replace testing on the intended CPU, GPU, driver, microphone, and Windows configuration.
-- PrimeDictate produces and inserts text; it does not execute spoken operating-system commands.
+- The application is Windows-only.
+- Vulkan behavior depends on the installed driver and hardware despite runtime preflight checks.
+- CUDA paths, catalogs, and failure handling are covered by automated tests, but this release was not physically benchmarked on an NVIDIA card by the maintainer producing these artifacts.
+- Cloud behavior also depends on provider availability, account access, quota, and API changes.
+- A successful build cannot replace validation on the target microphone, CPU/GPU, driver, and Windows configuration.
+- PrimeDictate produces text; it does not execute spoken operating-system commands.
 
-## Documentation
+## Documentation and Support
 
 - [Turkish User Guide](docs/USER_GUIDE_TR.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Vulkan Runtime Provenance](runtime/whisper-vulkan/PROVENANCE.md)
-- [License](LICENSE)
+- [GPL-3.0 License](LICENSE)
 
-## License
-
-PrimeDictate is licensed under the [GNU General Public License v3.0](LICENSE).
-
-The bundled whisper.cpp runtime retains its upstream license in [runtime/whisper-vulkan/LICENSE.whisper.cpp.txt](runtime/whisper-vulkan/LICENSE.whisper.cpp.txt). Third-party packages remain subject to their respective licenses.
-
-## Project and Support
-
-| | |
-|---|---|
-| Product | PrimeDictate |
-| Version | 1.0.0 |
-| Studio | Maximus Prime Software |
-| Website | [maximusprimesoftware.pages.dev](https://maximusprimesoftware.pages.dev/) |
-| Product page | [PrimeDictate](https://maximusprimesoftware.pages.dev/projects/primedictate/) |
-| Repository | [github.com/MaximusPrime/PrimeDictate](https://github.com/MaximusPrime/PrimeDictate) |
-| Email | [maximusprimesoftware@gmail.com](mailto:maximusprimesoftware@gmail.com) |
+Project: [PrimeDictate](https://maximusprimesoftware.pages.dev/projects/primedictate/) · Website: [Maximus Prime Software](https://maximusprimesoftware.pages.dev/) · Email: [maximusprimesoftware@gmail.com](mailto:maximusprimesoftware@gmail.com)
 
 <p align="center">
-  <a href="https://maximusprimesoftware.pages.dev/">
-    <img src="assets/maximus-prime-software.png" alt="Maximus Prime Software" width="230">
-  </a>
+  <a href="https://maximusprimesoftware.pages.dev/"><img src="assets/maximus-prime-software.png" alt="Maximus Prime Software" width="230"></a>
 </p>
 
-<p align="center">
-  <strong>Designed and developed by Maximus Prime Software.</strong><br>
-  <sub>Private by design. Built for productive Windows workflows.</sub>
-</p>
+<p align="center"><strong>Private by design. Built for productive Windows workflows.</strong></p>

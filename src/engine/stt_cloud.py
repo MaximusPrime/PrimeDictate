@@ -5,8 +5,11 @@ import soundfile as sf
 import requests
 import numpy as np
 from src.engine.stt_base import BaseSTTEngine, TranscriptionCancelled
+from src.engine.provider_transport import (
+    ProviderRequestCancelled, failure_from_exception, failure_from_response, run_cancellable,
+)
 from src.config import config_manager
-from src.i18n import t
+from src.i18n import translate
 
 logger = logging.getLogger("PrimeDictate.STT_Cloud")
 
@@ -55,6 +58,7 @@ def _openai_language_request(model: str, language: str) -> dict:
 class CloudSTTEngine(BaseSTTEngine):
     def __init__(self):
         self.last_error = None
+        self.last_failure = None
 
     def load_model(self, model_name: str = "whisper-large-v3-turbo", language: str = "tr"):
         pass  # Cloud APIs load model remotely on server
@@ -66,6 +70,7 @@ class CloudSTTEngine(BaseSTTEngine):
             raise TranscriptionCancelled()
 
         self.last_error = None
+        self.last_failure = None
         # Convert numpy float32 audio to WAV in-memory bytes
         buffer = io.BytesIO()
         sf.write(buffer, audio, sample_rate, format='WAV', subtype='PCM_16')
@@ -89,7 +94,10 @@ class CloudSTTEngine(BaseSTTEngine):
                 }
                 if language != "auto":
                     data["language"] = language
-                resp = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=10)
+                resp = run_cancellable(
+                    lambda: requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=(5, 45)),
+                    cancel_check,
+                )
                 if resp.status_code == 200:
                     if cancel_check and cancel_check():
                         raise TranscriptionCancelled()
@@ -97,34 +105,41 @@ class CloudSTTEngine(BaseSTTEngine):
                     logger.info("Groq cloud transcription completed (%d characters).", len(text))
                     return text
                 else:
+                    self.last_failure = failure_from_response("groq", resp)
                     _log_http_error("Groq", resp)
-                    self.last_error = f"Groq {t('STT isteği başarısız oldu')} (HTTP {resp.status_code})."
+                    self.last_error = translate("cloud.error.stt_request", provider="Groq", detail=f"HTTP {resp.status_code}")
+            except ProviderRequestCancelled:
+                raise TranscriptionCancelled()
             except TranscriptionCancelled:
                 raise
             except Exception as e:
+                self.last_failure = failure_from_exception("groq", e)
                 _log_api_exception("Groq", e)
-                self.last_error = f"Groq {t('STT isteği başarısız oldu')} ({type(e).__name__})."
+                self.last_error = translate("cloud.error.stt_request", provider="Groq", detail=type(e).__name__)
 
         if provider == "openai" and api_key_openai:
             try:
                 from openai import OpenAI
-                client = OpenAI(api_key=api_key_openai)
+                client = OpenAI(api_key=api_key_openai, timeout=45, max_retries=0)
                 buffer.seek(0)
                 selected_model = model or "gpt-4o-mini-transcribe"
                 request = {"model": selected_model, "file": buffer}
                 request.update(_openai_language_request(selected_model, language))
-                transcript = client.audio.transcriptions.create(**request)
+                transcript = run_cancellable(lambda: client.audio.transcriptions.create(**request), cancel_check)
                 if cancel_check and cancel_check():
                     raise TranscriptionCancelled()
                 logger.info("OpenAI cloud transcription completed (%d characters).", len(transcript.text))
                 return transcript.text.strip()
+            except ProviderRequestCancelled:
+                raise TranscriptionCancelled()
             except TranscriptionCancelled:
                 raise
             except Exception as e:
+                self.last_failure = failure_from_exception("openai", e)
                 _log_api_exception("OpenAI", e)
                 status = getattr(e, "status_code", None)
                 suffix = f"HTTP {status}" if status is not None else type(e).__name__
-                self.last_error = f"OpenAI {t('STT isteği başarısız oldu')} ({suffix})."
+                self.last_error = translate("cloud.error.stt_request", provider="OpenAI", detail=suffix)
 
         if provider == "gemini":
             api_key_gemini = config_manager.get("api_key_gemini", "")
@@ -156,11 +171,11 @@ class CloudSTTEngine(BaseSTTEngine):
                         "https://generativelanguage.googleapis.com/v1beta/models/"
                         f"{model or 'gemini-3.6-flash'}:generateContent"
                     )
-                    response = requests.post(
-                        url,
-                        headers={"x-goog-api-key": api_key_gemini},
-                        json=payload,
-                        timeout=30,
+                    response = run_cancellable(
+                        lambda: requests.post(
+                            url, headers={"x-goog-api-key": api_key_gemini}, json=payload, timeout=(5, 60)
+                        ),
+                        cancel_check,
                     )
                     if response.status_code == 200:
                         if cancel_check and cancel_check():
@@ -169,15 +184,20 @@ class CloudSTTEngine(BaseSTTEngine):
                         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                         logger.info("Gemini cloud transcription completed (%d characters).", len(text))
                         return text
+
                     _log_http_error("Gemini", response)
-                    self.last_error = f"Gemini {t('STT isteği başarısız oldu')} (HTTP {response.status_code})."
+                    self.last_failure = failure_from_response("gemini", response)
+                    self.last_error = translate("cloud.error.stt_request", provider="Gemini", detail=f"HTTP {response.status_code}")
+                except ProviderRequestCancelled:
+                    raise TranscriptionCancelled()
                 except TranscriptionCancelled:
                     raise
                 except Exception as e:
+                    self.last_failure = failure_from_exception("gemini", e)
                     _log_api_exception("Gemini", e)
-                    self.last_error = f"Gemini {t('STT isteği başarısız oldu')} ({type(e).__name__})."
+                    self.last_error = translate("cloud.error.stt_request", provider="Gemini", detail=type(e).__name__)
 
         logger.error("No valid Cloud API key found or Cloud request failed.")
         if self.last_error is None:
-            self.last_error = f"{provider} {t('için geçerli API anahtarı bulunamadı.')}"
+            self.last_error = translate("cloud.error.no_valid_key", provider=provider)
         return ""

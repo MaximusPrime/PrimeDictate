@@ -1,12 +1,19 @@
 import math
 import os
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QBrush, QColor, QCursor, QPainter
-from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import QPoint, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
 from src.config import config_manager, get_resource_path
-from src.i18n import t
+from src.i18n import translate
 from src.ui.brand import app_mark_pixmap
 
 
@@ -23,7 +30,7 @@ class WaveVisualizer(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         cy = self.height() / 2.0
         num_bars = 7
         bar_width = 3
@@ -42,6 +49,94 @@ class WaveVisualizer(QWidget):
             painter.drawRoundedRect(x, cy - bar_height / 2.0, bar_width, bar_height, 1.5, 1.5)
 
 
+class OverlayPlayButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__("", parent)
+        self.setFixedSize(30, 30)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+
+        if not self.isEnabled():
+            bg_color = QColor(14, 18, 24)
+            border_color = QColor(37, 46, 57)
+            icon_color = QColor(72, 82, 96)
+        elif self.isDown():
+            bg_color = QColor(49, 61, 79)
+            border_color = QColor(240, 222, 170)
+            icon_color = QColor(255, 255, 255)
+        elif self.underMouse():
+            bg_color = QColor(35, 44, 58)
+            border_color = QColor(229, 208, 152)
+            icon_color = QColor(255, 255, 255)
+        else:
+            bg_color = QColor(20, 27, 36)
+            border_color = QColor(196, 167, 110, 220)
+            icon_color = QColor(245, 239, 226)
+
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(QPen(border_color, 1.5))
+        painter.drawEllipse(rect)
+
+        path = QPainterPath()
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        path.moveTo(cx - 3.0, cy - 5.0)
+        path.lineTo(cx + 5.0, cy)
+        path.lineTo(cx - 3.0, cy + 5.0)
+        path.closeSubpath()
+
+        painter.setBrush(QBrush(icon_color))
+        painter.setPen(Qt.NoPen)
+        painter.drawPath(path)
+
+
+class OverlayStopButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__("", parent)
+        self.setFixedSize(30, 30)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+
+        if not self.isEnabled():
+            bg_color = QColor(14, 18, 24)
+            border_color = QColor(37, 46, 57)
+            icon_color = QColor(72, 82, 96)
+        elif self.isDown():
+            bg_color = QColor(49, 61, 79)
+            border_color = QColor(240, 222, 170)
+            icon_color = QColor(255, 255, 255)
+        elif self.underMouse():
+            bg_color = QColor(35, 44, 58)
+            border_color = QColor(229, 208, 152)
+            icon_color = QColor(255, 255, 255)
+        else:
+            bg_color = QColor(20, 27, 36)
+            border_color = QColor(196, 167, 110, 220)
+            icon_color = QColor(245, 239, 226)
+
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(QPen(border_color, 1.5))
+        painter.drawEllipse(rect)
+
+        sq_size = 9.0
+        center_x = self.width() / 2.0
+        center_y = self.height() / 2.0
+        sq_rect = QRectF(center_x - sq_size / 2.0, center_y - sq_size / 2.0, sq_size, sq_size)
+        painter.setBrush(QBrush(icon_color))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(sq_rect, 1.5, 1.5)
+
+
 class OverlaySurface(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -58,10 +153,21 @@ class OverlaySurface(QWidget):
             self.window()._finish_drag()
             event.accept()
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        bg_color = QColor("#0d1117")
+        border_color = QColor(196, 167, 110, 210)
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(QPen(border_color, 1.25))
+        painter.drawRoundedRect(rect, 15.0, 15.0)
+
 
 class FloatingOverlay(QWidget):
-    def __init__(self, stop_callback=None):
+    def __init__(self, start_callback=None, stop_callback=None):
         super().__init__()
+        self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint
@@ -70,7 +176,7 @@ class FloatingOverlay(QWidget):
             | Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(360, 58)
+        self.setFixedSize(186, 46)
         self.drag_position = QPoint()
         self._has_saved_position = False
 
@@ -80,89 +186,62 @@ class FloatingOverlay(QWidget):
 
     def _setup_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setContentsMargins(3, 3, 3, 3)
 
         self.container = OverlaySurface(self)
         self.container.setObjectName("overlaySurface")
         self.container.setStyleSheet("""
-            QWidget#overlaySurface {
-                background-color: #0d1117;
-                border: 1px solid #c4a76e;
-                border-radius: 16px;
-            }
-            QLabel#overlayLogo, QLabel#overlayStatus, QLabel#dragGrip {
+            QLabel#overlayLogo, QLabel#dragGrip {
                 background: transparent;
                 border: none;
             }
-            QLabel#overlayStatus {
-                color: #edf0f3;
-                font-family: "Segoe UI";
-                font-size: 12px;
-                font-weight: 600;
-            }
             QLabel#dragGrip {
                 color: #606a76;
-                font-size: 14px;
-                padding-left: 2px;
+                font-size: 13px;
+                padding-left: 1px;
             }
-            QPushButton#overlayStop {
-                background-color: #2b171a;
-                border: 1px solid #6e2f37;
-                border-radius: 15px;
-                color: #f3c4c8;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton#overlayStop:hover {
-                background-color: #421c21;
-                border-color: #a84753;
-                color: #ffffff;
-            }
-            QPushButton#overlayStop:pressed { background-color: #5c222a; }
-            QPushButton#overlayStop:disabled { color: #584448; border-color: #382528; background-color: #1e1315; }
         """)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 190))
+        shadow.setBlurRadius(16)
+        shadow.setOffset(0, 3)
+        shadow.setColor(QColor(0, 0, 0, 180))
         self.container.setGraphicsEffect(shadow)
 
         container_layout = QHBoxLayout(self.container)
-        container_layout.setContentsMargins(10, 6, 10, 6)
-        container_layout.setSpacing(8)
+        container_layout.setContentsMargins(8, 3, 8, 3)
+        container_layout.setSpacing(6)
 
         self.logo_label = QLabel()
         self.logo_label.setObjectName("overlayLogo")
-        self.logo_label.setFixedSize(32, 32)
+        self.logo_label.setFixedSize(26, 26)
         self.logo_label.setAlignment(Qt.AlignCenter)
         self.logo_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         logo_path = get_resource_path(os.path.join("assets", "PrimeDictate-AppIcon.png"))
         if os.path.exists(logo_path):
-            self.logo_label.setPixmap(app_mark_pixmap(30))
+            self.logo_label.setPixmap(app_mark_pixmap(24))
         else:
             self.logo_label.setText("PD")
 
         self.visualizer = WaveVisualizer()
+        self.visualizer.setFixedSize(60, 20)
         self.visualizer.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.status_label = QLabel(t("Dinleniyor..."))
-        self.status_label.setObjectName("overlayStatus")
-        self.status_label.setMinimumWidth(85)
-        self.status_label.setMaximumWidth(95)
-        self.status_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.stop_button = QPushButton("■")
-        self.stop_button.setObjectName("overlayStop")
-        self.stop_button.setToolTip(t("Durdur"))
-        self.stop_button.setFixedSize(30, 30)
-        self.stop_button.setCursor(Qt.PointingHandCursor)
+
+        self.play_button = OverlayPlayButton()
+        self.play_button.setToolTip(translate("overlay.start_dictation"))
+        self.play_button.clicked.connect(self._request_start)
+
+        self.stop_button = OverlayStopButton()
+        self.stop_button.setToolTip(translate("overlay.stop_dictation"))
         self.stop_button.clicked.connect(self._request_stop)
+        self.stop_button.setVisible(False)
+
         self.drag_grip = QLabel("⋮⋮")
         self.drag_grip.setObjectName("dragGrip")
         self.drag_grip.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         container_layout.addWidget(self.logo_label)
         container_layout.addWidget(self.visualizer)
-        container_layout.addWidget(self.status_label, 1)
+        container_layout.addWidget(self.play_button)
         container_layout.addWidget(self.stop_button)
         container_layout.addWidget(self.drag_grip)
         main_layout.addWidget(self.container)
@@ -209,15 +288,18 @@ class FloatingOverlay(QWidget):
         super().showEvent(event)
 
     def set_status(self, text: str, color_hex: str = "#edf0f3"):
-        self.status_label.setText(t(text))
-        self.status_label.setStyleSheet(
-            f"color: {color_hex}; background: transparent; border: none; "
-            'font-family: "Segoe UI"; font-size: 12px; font-weight: 600;'
-        )
+        pass
 
     def set_recording_active(self, active: bool):
         self.stop_button.setVisible(active)
         self.stop_button.setEnabled(active)
+        self.play_button.setVisible(not active)
+        self.play_button.setEnabled(not active)
+
+    def _request_start(self):
+        if self.start_callback and self.play_button.isEnabled():
+            self.play_button.setEnabled(False)
+            self.start_callback()
 
     def _request_stop(self):
         if self.stop_callback and self.stop_button.isEnabled():
@@ -251,5 +333,3 @@ class FloatingOverlay(QWidget):
     def _finish_drag(self):
         position = self._clamped_position(self.pos())
         self.move(position)
-        self._has_saved_position = True
-        config_manager.set("overlay_position", {"x": position.x(), "y": position.y()})

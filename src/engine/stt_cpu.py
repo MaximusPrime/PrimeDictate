@@ -5,7 +5,7 @@ import numpy as np
 
 from src.engine.stt_base import BaseSTTEngine, TranscriptionCancelled
 from src.engine.model_manager import model_manager
-from src.i18n import t
+from src.i18n import translate
 
 logger = logging.getLogger("PrimeDictate.STT_CPU")
 
@@ -24,7 +24,7 @@ class CPUSTTEngine(BaseSTTEngine):
         logger.info("Loading Whisper model '%s' on CPU.", model_name)
         model_path = model_manager.get_model_path(model_name, "cpu")
         if not model_manager.is_model_downloaded(model_name, "cpu"):
-            raise RuntimeError(t("Seçilen yerel Whisper modeli indirilmemiş."))
+            raise RuntimeError(translate("stt.local_model_missing"))
         self.model = WhisperModel(
             model_path,
             device="cpu",
@@ -32,6 +32,7 @@ class CPUSTTEngine(BaseSTTEngine):
             cpu_threads=max(1, min(8, os.cpu_count() or 4)),
         )
         self.model_name = model_name
+        self.last_inference_device = "CPU"
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "tr", cancel_check=None) -> str:
         if len(audio) == 0:

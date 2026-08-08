@@ -1,8 +1,10 @@
 import os
+import shutil
+import tempfile
 import threading
 import logging
 import requests
-from src.i18n import t
+from src.i18n import translate
 from PySide6.QtCore import QObject, Signal
 from src.config import APP_DIR
 
@@ -18,7 +20,17 @@ VULKAN_MODEL_FILES = {
 VULKAN_MODEL_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 VULKAN_MODEL_DIR = os.path.join(APP_DIR, "models", "whisper.cpp")
 FASTER_WHISPER_MODEL_DIR = os.path.join(APP_DIR, "models", "faster-whisper")
-SUPPORTED_MODEL_NAMES = frozenset(VULKAN_MODEL_FILES)
+FASTER_WHISPER_MODEL_NAMES = frozenset({
+    "tiny", "base", "small", "medium", "large-v3-turbo", "large-v3",
+})
+
+
+def supported_models(backend: str) -> frozenset[str]:
+    if backend == "vulkan":
+        return frozenset(VULKAN_MODEL_FILES)
+    if backend in {"cpu", "cuda"}:
+        return FASTER_WHISPER_MODEL_NAMES
+    return frozenset()
 
 class ModelManager(QObject):
     progress = Signal(int, str)  # percentage (0-100), status message
@@ -27,9 +39,10 @@ class ModelManager(QObject):
     def __init__(self):
         super().__init__()
         self._is_downloading = False
+        self._download_lock = threading.Lock()
 
     def get_model_path(self, model_name: str, backend: str):
-        if model_name not in SUPPORTED_MODEL_NAMES:
+        if model_name not in supported_models(backend):
             raise ValueError(f"Desteklenmeyen model: {model_name}")
         if backend == "vulkan":
             filename = VULKAN_MODEL_FILES.get(model_name)
@@ -39,44 +52,89 @@ class ModelManager(QObject):
     def is_model_downloaded(self, model_name: str, backend: str = "cpu") -> bool:
         if backend == "vulkan":
             try:
-                return os.path.isfile(self.get_model_path(model_name, backend))
+                path = self.get_model_path(model_name, backend)
+                return os.path.isfile(path) and os.path.getsize(path) > 1024 * 1024
             except ValueError:
                 return False
         try:
             model_path = self.get_model_path(model_name, backend)
             required_files = ("config.json", "model.bin", "tokenizer.json")
-            return all(os.path.isfile(os.path.join(model_path, filename)) for filename in required_files)
+            return all(
+                os.path.isfile(os.path.join(model_path, filename))
+                and os.path.getsize(os.path.join(model_path, filename)) > 0
+                for filename in required_files
+            )
         except (OSError, ValueError):
             return False
 
     def download_model_async(self, model_name: str, backend: str = "cpu"):
-        if self._is_downloading:
-            return
-        self._is_downloading = True
+        with self._download_lock:
+            if self._is_downloading:
+                return False
+            self._is_downloading = True
         threading.Thread(target=self._download_worker, args=(model_name, backend), daemon=True).start()
+        return True
 
     def _download_worker(self, model_name: str, backend: str):
         logger.info("Starting download for model '%s' (%s).", model_name, backend)
-        self.progress.emit(-1, f"{t('Model dosyası indiriliyor')}: {model_name}...")
+        self.progress.emit(-1, translate("model.progress.downloading", model=model_name))
 
         try:
             if backend == "vulkan":
                 self._download_vulkan_model(model_name)
             else:
-                from faster_whisper.utils import download_model
-                self.progress.emit(-1, f"{t('HuggingFace sunucusuna bağlanılıyor')} ({model_name})...")
-                model_path = self.get_model_path(model_name, backend)
-                os.makedirs(model_path, exist_ok=True)
-                download_model(model_name, output_dir=model_path)
+                self._download_faster_whisper_model(model_name, backend)
             
-            self.progress.emit(100, t("Model '{model}' başarıyla yüklendi ve hazır.").format(model=model_name))
+            self.progress.emit(100, translate("model.progress.ready", model=model_name))
             self.download_finished.emit(backend, model_name, True, "")
         except Exception as e:
             logger.error(f"Failed to download model '{model_name}': {e}")
-            self.progress.emit(0, f"{t('İndirme hatası')}: {e}")
+            self.progress.emit(0, translate("model.error.download", detail=e))
             self.download_finished.emit(backend, model_name, False, str(e))
         finally:
-            self._is_downloading = False
+            with self._download_lock:
+                self._is_downloading = False
+
+    def _download_faster_whisper_model(self, model_name: str, backend: str):
+        from faster_whisper.utils import download_model
+
+        self.progress.emit(-1, translate("model.progress.connecting_huggingface", model=model_name))
+        model_path = self.get_model_path(model_name, backend)
+        parent_dir = os.path.dirname(model_path)
+        os.makedirs(parent_dir, exist_ok=True)
+        staging_path = tempfile.mkdtemp(prefix=f".{model_name}-", suffix=".download", dir=parent_dir)
+        backup_path = None
+        try:
+            download_model(model_name, output_dir=staging_path)
+            self._validate_faster_whisper_model(staging_path)
+            if os.path.exists(model_path):
+                backup_path = tempfile.mkdtemp(prefix=f".{model_name}-", suffix=".backup", dir=parent_dir)
+                os.rmdir(backup_path)
+                os.replace(model_path, backup_path)
+            try:
+                os.replace(staging_path, model_path)
+            except Exception:
+                if backup_path and os.path.exists(backup_path) and not os.path.exists(model_path):
+                    os.replace(backup_path, model_path)
+                raise
+            if backup_path and os.path.exists(backup_path):
+                shutil.rmtree(backup_path)
+        finally:
+            if os.path.exists(staging_path):
+                shutil.rmtree(staging_path, ignore_errors=True)
+
+    @staticmethod
+    def _validate_faster_whisper_model(model_path: str):
+        required_files = ("config.json", "model.bin", "tokenizer.json")
+        missing = [
+            filename for filename in required_files
+            if not os.path.isfile(os.path.join(model_path, filename))
+            or os.path.getsize(os.path.join(model_path, filename)) <= 0
+        ]
+        if missing:
+            raise RuntimeError(translate("model.error.incomplete", files=", ".join(missing)))
+        from faster_whisper import WhisperModel
+        WhisperModel(model_path, device="cpu", compute_type="int8", cpu_threads=1)
 
     def _download_vulkan_model(self, model_name: str):
         target_path = self.get_model_path(model_name, "vulkan")
@@ -97,7 +155,9 @@ class ModelManager(QObject):
                         downloaded += len(block)
                         if total_size:
                             percent = min(99, int(downloaded * 100 / total_size))
-                            self.progress.emit(percent, f"{t('Vulkan modeli indiriliyor')}: %{percent}")
+                            self.progress.emit(percent, translate("model.progress.downloading_vulkan", percent=percent))
+            if os.path.getsize(partial_path) <= 1024 * 1024:
+                raise RuntimeError(translate("model.error.invalid_vulkan_file"))
             os.replace(partial_path, target_path)
         except Exception:
             if os.path.exists(partial_path):

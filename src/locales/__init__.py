@@ -1,0 +1,1 @@
+"""PrimeDictate locale resources."""

@@ -10,6 +10,7 @@ class TranscriptionCancelled(Exception):
 class BaseSTTEngine(ABC):
     last_detected_language = None
     last_language_probability = None
+    last_inference_device = None
 
     @staticmethod
     def prepare_audio(audio: np.ndarray, sample_rate: int) -> np.ndarray:

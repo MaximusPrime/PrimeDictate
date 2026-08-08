@@ -2,7 +2,8 @@ import logging
 import numpy as np
 from src.engine.stt_base import BaseSTTEngine, TranscriptionCancelled
 from src.engine.model_manager import model_manager
-from src.i18n import t
+from src.i18n import translate
+from src.engine.hardware_capabilities import detect_cuda_backend, preferred_cuda_compute_types
 
 logger = logging.getLogger("PrimeDictate.STT_CUDA")
 
@@ -15,27 +16,35 @@ class CUDASTTEngine(BaseSTTEngine):
         if self.model is not None and self.model_name == model_name:
             return
 
-        logger.info(f"Loading Whisper model '{model_name}' on NVIDIA GPU (CUDA)...")
+        capability = detect_cuda_backend()
+        if not capability.available:
+            raise RuntimeError(translate("cuda.error.no_device"))
+        compute_types = preferred_cuda_compute_types(capability.detail.split(", "))
+        if not compute_types:
+            raise RuntimeError(translate("cuda.error.no_compute_type"))
+
+        logger.info("Loading Whisper model '%s' on NVIDIA GPU (CUDA).", model_name)
         from faster_whisper import WhisperModel
         model_path = model_manager.get_model_path(model_name, "cuda")
         if not model_manager.is_model_downloaded(model_name, "cuda"):
-            raise RuntimeError(t("Seçilen yerel Whisper modeli indirilmemiş."))
-        try:
-            self.model = WhisperModel(model_path, device="cuda", compute_type="float16")
-            self.model_name = model_name
-            logger.info(f"Successfully loaded '{model_name}' on NVIDIA CUDA float16.")
-        except Exception as e1:
-            logger.warning(f"CUDA float16 failed ({e1}), attempting CUDA int8...")
+            raise RuntimeError(translate("stt.local_model_missing"))
+        last_error = None
+        for compute_type in compute_types:
             try:
-                self.model = WhisperModel(model_path, device="cuda", compute_type="int8")
+                self.model = WhisperModel(model_path, device="cuda", compute_type=compute_type)
                 self.model_name = model_name
-                logger.info(f"Successfully loaded '{model_name}' on NVIDIA CUDA int8.")
-            except Exception as e2:
-                self.model = None
-                self.model_name = None
-                raise RuntimeError(
-                    t("CUDA modeli yüklenemedi. NVIDIA sürücülerini kontrol edin veya Yerel CPU motorunu seçin.")
-                ) from e2
+                self.last_inference_device = f"NVIDIA CUDA GPU 0 • {compute_type}"
+                logger.info("Successfully loaded '%s' on NVIDIA CUDA %s.", model_name, compute_type)
+                return
+            except Exception as error:
+                last_error = error
+                logger.warning("CUDA model load failed with compute_type=%s (%s).", compute_type, type(error).__name__)
+        self.model = None
+        self.model_name = None
+        self.last_inference_device = None
+        raise RuntimeError(
+            translate("cuda.error.model_load")
+        ) from last_error
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "tr", cancel_check=None) -> str:
         if len(audio) == 0:
@@ -68,4 +77,4 @@ class CUDASTTEngine(BaseSTTEngine):
             raise
         except Exception as e:
             logger.error(f"Transcription error in CUDA engine: {e}")
-            raise RuntimeError(t("CUDA transkripsiyonu başarısız oldu.")) from e
+            raise RuntimeError(translate("cuda.error.transcription")) from e

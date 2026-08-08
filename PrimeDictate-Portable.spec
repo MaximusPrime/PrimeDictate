@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
+version_file = os.environ.get("PRIMEDICTATE_VERSION_FILE")
+
 
 a = Analysis(
     ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[('PrimeDictate-Logo.png', '.'), ('assets\\maximus-prime-software.png', 'assets'), ('assets\\PrimeDictate-AppIcon.png', 'assets'), ('runtime', 'runtime')],
+    datas=[('PrimeDictate-Logo.png', '.'), ('assets\\maximus-prime-software.png', 'assets'), ('assets\\PrimeDictate-AppIcon.png', 'assets'), ('src\\locales', 'src\\locales'), ('runtime', 'runtime')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,6 +39,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    version='C:\\Users\\MAXIMUS\\AppData\\Local\\Temp\\primedictate-version-9esyz0n8\\portable-version.txt',
+    version=version_file,
     icon=['PrimeDictate-Logo.ico'],
 )

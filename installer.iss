@@ -23,8 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 
 [Languages]
-Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "tr"; MessagesFile: "compiler:Languages\Turkish.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

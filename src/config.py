@@ -3,7 +3,7 @@ import sys
 import json
 import logging
 import tempfile
-from src.i18n import t
+from src.i18n import translate
 
 logger = logging.getLogger("PrimeDictate.Config")
 
@@ -128,8 +128,10 @@ DEFAULT_CONFIG = {
     "stt_model_openai": "gpt-4o-mini-transcribe",
     "stt_model_gemini": "gemini-3.6-flash",
     "vulkan_executable": "",
+    "vulkan_beam_size": 1,
     "ai_cleanup_enabled": True,
     "ai_cleanup_provider": "rule_based",  # "rule_based", "groq", "openai", "gemini", "grok", "custom_ollama"
+    "cleanup_failure_policy": "rule_based",  # "rule_based", "raw" or "fail"
     "ai_model_groq": "llama-3.3-70b-versatile",
     "ai_model_openai": "gpt-4o-mini",
     "ai_model_gemini": "gemini-3.6-flash",
@@ -144,12 +146,15 @@ DEFAULT_CONFIG = {
     "api_key_grok": "",
     "api_key_custom": "",
     "audio_device_index": None,
+    "max_recording_seconds": 300,
     "auto_paste": True,
     "restore_clipboard": True,
     "history_enabled": True,
     "play_sound": True,
     "start_with_windows": False,
     "overlay_enabled": True,
+    "overlay_always_on": False,
+    "ui_font_size": "normal",  # "small", "normal", "large"
     "allow_cloud_fallback": False,
     "overlay_position": None
 }
@@ -244,7 +249,7 @@ class ConfigManager:
             pass
 
         if not written:
-            raise RuntimeError(t("Windows kimlik bilgisi kasasına erişilemedi."))
+            raise RuntimeError(translate("credentials.windows_vault_unavailable"))
 
     def _migrate_legacy_settings(self):
         changed = False

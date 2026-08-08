@@ -1,299 +1,53 @@
+"""Strict, file-backed Turkish and English localization catalog."""
+
+import json
+from pathlib import Path
+
+
 _language = "en"
+_LOCALE_DIR = Path(__file__).with_name("locales")
 
 
-EN = {
-    # Brand & Taglines
-    "Konuşun. Gerisini Prime Dictate halletsin.": "Speak. Let Prime Dictate handle the rest.",
-    "Prime Dictate hakkında": "About Prime Dictate",
-    "Prime Dictate'i kullanıma hazırlayın": "Prepare Prime Dictate for use",
-    "Prime Dictate zaten çalışıyor.": "Prime Dictate is already running.",
-    "Sistem Geneli Sesli Yazma": "System-wide Voice Typing",
-    "Yapay Zeka Destekli Sesli Yazma": "AI-Powered Voice Typing",
-    "Gizlilik odaklı tasarım. Üretken Windows iş akışları için geliştirildi.": "Private by design. Built for productive Windows workflows.",
-    "Maximus Prime Software tarafından tasarlandı ve geliştirildi.": "Designed and developed by Maximus Prime Software.",
+def _load_locale(language: str) -> dict[str, str]:
+    path = _LOCALE_DIR / f"{language}.json"
+    with path.open("r", encoding="utf-8") as locale_file:
+        catalog = json.load(locale_file)
+    if not isinstance(catalog, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) and value.strip()
+        for key, value in catalog.items()
+    ):
+        raise RuntimeError(f"Invalid locale catalog: {path}")
+    return catalog
 
-    # Navigation / Tab Titles
-    "Ana Sayfa": "Home",
-    "Genel durum ve hızlı dikte": "Overview and quick dictation",
-    "Ses → Metin": "Speech to Text",
-    "STT motoru, model ve çalışma konumu": "STT engine, model, and processing location",
-    "Metin İşleme & API": "Text Processing & API",
-    "Düzenleme yöntemi ve servis erişimi": "Processing method and service access",
-    "Dosya Transkripsiyonu": "File Transcription",
-    "Ses ve video dosyaları": "Audio and video files",
-    "Ses & Kısayollar": "Audio & Shortcuts",
-    "Mikrofon ve global tuş": "Microphone and global hotkey",
-    "Geçmiş": "History",
-    "Önceki transkriptler": "Previous transcripts",
-    "Tanılama": "Diagnostics",
-    "Gelişmiş teknik kayıtlar": "Advanced technical logs",
-    "Hakkında": "About",
-    "Ürün, sürüm ve geliştirici bilgileri": "Product, version, and developer information",
 
-    # Status & Header
-    "●  Hazır": "●  Ready",
-    "Hazır": "Ready",
-    "Dikteyi Başlat": "Start Dictation",
-    "Kaydı Durdur": "Stop Recording",
-    "Dikte Et": "Dictate",
-    "Durdur": "Stop",
-    "Kurulum gerekli": "Setup required",
-    "BAŞLANGIÇ": "GET STARTED",
-    "Dikte çalışma alanınızın genel görünümü": "Overview of your dictation workspace",
-    "Sesin nerede ve hangi modelle yazıya dönüştürüleceğini belirleyin": "Choose where and how speech is transcribed",
-    "Ham STT çıktısının düzenlenmesini ve servis erişimlerini yönetin": "Manage raw STT processing and service access",
-    "Ses ve video dosyalarını metne dönüştürün": "Convert audio and video files into text",
-    "Mikrofon ve global erişim ayarları": "Microphone and global access settings",
-    "Önceki transkriptleri bulun ve yeniden kullanın": "Find and reuse previous transcripts",
-    "Teknik durum ve sorun giderme araçları": "Technical status and troubleshooting tools",
-    "Henüz etkin bir dikte yapılandırması yok. STT motorunu, konuşma dilini ve mikrofonu seçtikten sonra gerçek çalışma özeti burada gösterilecek.": "There is no active dictation configuration yet. After selecting the STT engine, spoken language, and microphone, your workspace summary will be shown here.",
-    "1  STT motorunu seçin     2  Modeli ve dili belirleyin     3  Ayarları kaydedin": "1  Choose an STT engine     2  Select model and language     3  Save settings",
-    "Kurulumu Başlat": "Start Setup",
-    "Dikteye başlamadan önce kısa kurulumu tamamlayın.": "Complete the quick setup before dictating.",
-    "Doğru STT motorunu ve konuşma dilini seçerek güvenilir bir çalışma alanı oluşturun.": "Create a reliable workspace by choosing the right STT engine and spoken language.",
-    "Henüz etkin yapılandırma yok": "No active configuration yet",
-    "Ayarlar bu cihazda saklanır. API anahtarları Windows kimlik kasasında korunur.": "Settings are stored on this device. API keys are secured in Windows Credential Manager.",
-    "Ayarları Kaydet": "Save Settings",
-    "Global kısayolunuzla herhangi bir uygulamada dikteye başlayın.": "Start dictating in any application using your global hotkey.",
-    "Sistem hazır": "System ready",
+TR = _load_locale("tr")
+EN_CATALOG = _load_locale("en")
+if set(TR) != set(EN_CATALOG):
+    missing_tr = sorted(set(EN_CATALOG) - set(TR))
+    missing_en = sorted(set(TR) - set(EN_CATALOG))
+    raise RuntimeError(
+        f"Locale key mismatch; missing_tr={missing_tr!r}, missing_en={missing_en!r}"
+    )
 
-    # Dashboard Cards
-    "AKTİF MOTOR": "ACTIVE ENGINE",
-    "AKTIF MOTOR": "ACTIVE ENGINE",
-    "MODEL": "MODEL",
-    "KISAYOL": "HOTKEY",
-    "GİZLİLİK": "PRIVACY",
-    "GIZLILIK": "PRIVACY",
-    "KONUŞMA DILI": "SPOKEN LANGUAGE",
-    "AMD / Vulkan": "AMD / Vulkan",
-    "NVIDIA CUDA": "NVIDIA CUDA",
-    "Yerel CPU": "Local CPU",
-    "Bulut STT": "Cloud STT",
-    "Yerel": "Local",
-    "Bulut etkin": "Cloud enabled",
-    "Yerel + izinli fallback": "Local + approved fallback",
-
-    # Setup Stepper Headers
-    "1  SES → METİN\nZorunlu • Yerel veya bulut STT": "1  SPEECH → TEXT\nRequired • Local or cloud STT",
-    "2  METİN DÜZENLEME\nİsteğe bağlı • Ayrı yöntem ve model": "2  TEXT PROCESSING\nOptional • Independent method and model",
-    "1. Ses → Metin (STT)": "1. Speech to Text (STT)",
-    "Bu aşama yalnızca konuşmayı yazıya çevirir. Yerel seçenekler sesi cihazda işler; bulut seçeneği ses kaydını seçtiğiniz servise gönderir.": "This stage only converts speech into text. Local options process audio on-device; the cloud option sends the recording to your selected service.",
-    "STT çalışma konumu": "STT processing location",
-    "Yerel GPU • Vulkan (AMD / Intel / NVIDIA)": "Local GPU • Vulkan (AMD / Intel / NVIDIA)",
-    "Yerel GPU • CUDA (NVIDIA)": "Local GPU • CUDA (NVIDIA)",
-    "Yerel CPU • Özel ve uyumlu": "Local CPU • Private and compatible",
-    "Bulut STT • Groq / OpenAI / Gemini": "Cloud STT • Groq / OpenAI / Gemini",
-    "YEREL WHISPER YAPILANDIRMASI VE MODEL YÖNETİMİ": "LOCAL WHISPER CONFIGURATION AND MODEL MANAGEMENT",
-    "YEREL WHISPER YAPILANDIRMASI": "LOCAL WHISPER CONFIGURATION",
-    "Yerel model boyutu": "Local model size",
-    "Küçük modeller daha hızlı ve hafiftir; büyük modeller daha fazla bellek kullanır, genellikle daha yüksek doğruluk sağlar. Bu seçim yalnızca yerel motorları etkiler.": "Smaller models are faster and lighter; larger models use more memory and provide higher accuracy. This setting only affects local engines.",
-    "Vulkan runtime": "Vulkan runtime",
-    "Dahili runtime otomatik kullanılır; özel whisper-cli.exe isteğe bağlıdır": "The bundled runtime is used automatically; a custom whisper-cli.exe is optional",
-    "Özel Runtime Seç": "Choose Custom Runtime",
-    "Vulkan runtime kontrol edilmedi": "Vulkan runtime has not been checked",
-    "BULUT STT YAPILANDIRMASI": "CLOUD STT CONFIGURATION",
-    "Transkripsiyon servisi": "Transcription service",
-    "Bulut STT modeli": "Cloud STT model",
-    "Konuşma dili": "Spoken language",
-    "Otomatik algıla": "Auto-detect",
-    "Yerel Whisper Modeli": "Local Whisper Model",
-    "Model Durumu Kontrol Ediliyor...": "Checking model status...",
-    "Seçilen Modeli İndir": "Download Selected Model",
-
-    # Behavior & Options
-    "Davranış ve Otomasyon": "Behavior & Automation",
-    "Metni aktif pencereye otomatik yapıştır": "Automatically paste text into active window",
-    "Yapıştırmadan sonra eski panoyu geri yükle": "Restore previous clipboard contents after pasting",
-    "Yapıştırmadan sonra önceki pano metnini geri yükle": "Restore previous clipboard text after pasting",
-    "Yalnızca düz metin korunur; resim, dosya ve biçimlendirilmiş pano içerikleri geri yüklenmez.": "Only plain text is preserved; images, files, and formatted clipboard contents are not restored.",
-    "Dikte geçmişini bu cihazda sakla": "Store dictation history on this device",
-    "Kayıt başlangıç ve bitiş seslerini çal": "Play recording start and stop sounds",
-    "Yüzen ses dalgası göstergesini kullan": "Show floating audio waveform indicator",
-    "Windows ile otomatik başlat": "Start automatically with Windows",
-    "Yerel motor başarısızsa buluta geçmeme izin ver": "Allow cloud fallback if local engine fails",
-    "2. Metin Düzenleme (İsteğe Bağlı)": "2. Text Processing (Optional)",
-    "Bu aşama ses tanımadan sonra çalışır. Kapalıysa STT çıktısı hiçbir düzenleme yapılmadan kullanılır; açıksa seçtiğiniz yerel veya bulut yöntemi metni temizler ve biçimlendirir.": "This stage runs after speech recognition. When disabled, raw STT output is used unchanged; when enabled, your selected local or cloud method cleans and formats the text.",
-    "STT çıktısını otomatik düzenle": "Automatically process STT output",
-    "Düzenleme yöntemi": "Processing method",
-    "Kural tabanlı • Yerel, hızlı, LLM kullanmaz": "Rule-based • Local, fast, no LLM",
-    "Ollama / LM Studio • Yerel LLM": "Ollama / LM Studio • Local LLM",
-    "Google Gemini • Bulut LLM (Gemini 3.6 / 3.1)": "Google Gemini • Cloud LLM (Gemini 3.6 / 3.1)",
-    "OpenAI • Bulut LLM (GPT-5.4 / GPT-4o / o3-mini)": "OpenAI • Cloud LLM (GPT-5.4 / GPT-4o / o3-mini)",
-    "Groq • Bulut LLM (Llama 3.3 70B)": "Groq • Cloud LLM (Llama 3.3 70B)",
-    "xAI Grok • Bulut LLM (Grok-4.5 / Grok-4.3)": "xAI Grok • Cloud LLM (Grok-4.5 / Grok-4.3)",
-    "Google Gemini • Bulut LLM": "Google Gemini • Cloud LLM",
-    "xAI Grok • Bulut LLM": "xAI Grok • Cloud LLM",
-    "Groq • Bulut LLM": "Groq • Cloud LLM",
-    "OpenAI • Bulut LLM": "OpenAI • Cloud LLM",
-    "Bulut düzenleme modeli": "Cloud processing model",
-    "Yerel API adresi": "Local API address",
-    "Model": "Model",
-    "Düzenleme profili": "Processing profile",
-    "Standart imla ve temizleme": "Standard spelling & punctuation cleanup",
-    "Resmi iş ve e-posta dili": "Formal business & email style",
-    "Kodlama ve teknik terimler": "Coding & technical terms",
-    "İngilizceye çevir": "Translate to English",
-    "Maddeler halinde özetle": "Summarize as bullet points",
-    "Ek düzenleme kuralları": "Additional processing rules",
-    "Örn: Özel isimleri koru, kısa cümleler kullan, üslubu resmi tut...": "e.g., Preserve proper names, use short sentences, maintain formal tone...",
-    "Bulut Servis Erişimleri": "Cloud Service Access",
-    "Yalnızca etkin STT veya metin düzenleme sağlayıcısının anahtarı gösterilir. Anahtarlar düz metin ayar dosyasına değil Windows Kimlik Bilgisi Yöneticisi'ne kaydedilir.": "Only keys required by active STT or text processing providers are shown. Keys are stored in Windows Credential Manager, not plain-text files.",
-    "Gemini API anahtarı": "Gemini API key",
-    "Google AI Studio API anahtarı": "Google AI Studio API key",
-    "Grok API anahtarı": "Grok API key",
-    "xAI API anahtarı": "xAI API key",
-    "Groq API anahtarı": "Groq API key",
-    "Groq Cloud API anahtarı": "Groq Cloud API key",
-    "OpenAI API anahtarı": "OpenAI API key",
-    "OpenAI Platform API anahtarı": "OpenAI Platform API key",
-
-    # File Transcription
-    "Ses veya Video Dosyasını Metne Çevir (.mp3, .wav, .mp4, .m4a)": "Transcribe Audio or Video File (.mp3, .wav, .mp4, .m4a)",
-    "Ses veya Video Dosyasını Metne Çevir (.mp3, .wav, .mp4, .m4a, .mkv, .flac, .ogg)": "Transcribe Audio or Video File (.mp3, .wav, .mp4, .m4a, .mkv, .flac, .ogg)",
-    "Bir ses veya video dosyası seçin...": "Select an audio or video file...",
-    "Gözat...": "Browse...",
-    "Transkripsiyonu Başlat": "Start Transcription",
-    "İptal": "Cancel",
-    "Çevrilen Metin:": "Transcribed text:",
-    "Metni Kopyala": "Copy Text",
-    "Metni Dosyaya Kaydet": "Save Text to File",
-
-    # Hotkey & App Settings
-    "Küresel Kısayol Tuşu": "Global Hotkey",
-    "Kısayol Tuşu:": "Hotkey:",
-    "Örn: ctrl+alt+d veya f9": "Example: ctrl+alt+d or f9",
-    "Kısayol Çalışma Modu:": "Hotkey mode:",
-    "Bas-Aç (Toggle) - Tuşa 1 kez basınca başlar, 1 kez basınca biter": "Toggle - Press once to start and once to stop",
-    "Bas-Tut (Hold) - Tuşa basılı tutulduğu sürece kaydeder": "Hold - Record while holding down the key",
-    "Uygulama Dili": "Application Language",
-    "Arayüz dili": "Interface language",
-    "Dil değişikliği ayarlar kaydedildiğinde uygulanır.": "Language changes take effect after saving settings.",
-    "Mikrofon Girişi": "Microphone Input",
-    "Mikrofon Aygıtı:": "Microphone device:",
-    "Varsayılan Sistem Mikrofonu": "Default System Microphone",
-    "Canlı Mikrofon Test Metresi:": "Live microphone level:",
-    "Geçmişte ara...": "Search history...",
-    "Seçilen Metni Kopyala": "Copy Selected Text",
-    "Geçmişi Temizle": "Clear History",
-    "Geliştirici Tanı Ekranı ve Canlı Log Konsolu": "Developer Diagnostics and Live Log Console",
-    "Konsolu Temizle": "Clear Console",
-    "Mikrofon Tanı Bilgisi": "Microphone Diagnostics",
-    "Bulunan Mikrofon Sayısı": "Microphones found",
-
-    # Links & Footer
-    "Web Sitesi": "Website",
-    "GitHub": "GitHub",
-    "E-posta": "Email",
-    "Sürüm": "Version",
-
-    # Action Messages & Dialogs
-    "Başarılı": "Success",
-    "Hata": "Error",
-    "Kaydedildi": "Saved",
-    "Kopyalandı": "Copied",
-    "Ayarlar başarıyla kaydedildi.": "Settings saved successfully.",
-    "Tamamen yerel çalışır. Dolgu seslerini temizler, ilk harfi büyütür ve temel noktalama ekler. Profil, özel talimat veya üretken AI modeli kullanmaz.": "Runs entirely on-device. Removes filler words, capitalizes the first letter, and adds basic punctuation without using generative AI models.",
-    "STT metnini belirttiğiniz Ollama veya LM Studio sunucusundaki yerel modele gönderir. Düzenleme profilleri ve ek kurallar uygulanır.": "Sends STT text to a local LLM running on your Ollama or LM Studio server. Processing profiles and custom rules are applied.",
-    "STT metnini Google Gemini bulut modeline gönderir. Ses değil, yalnızca yazıya çevrilmiş metin bu aşamada işlenir.": "Sends STT text to the Google Gemini cloud model. Only text, not audio, is processed at this stage.",
-    "STT metnini xAI Grok bulut modeline gönderir. Ses değil, yalnızca yazıya çevrilmiş metin bu aşamada işlenir.": "Sends STT text to the xAI Grok cloud model. Only text, not audio, is processed at this stage.",
-    "STT metnini Groq üzerindeki LLM'e gönderir. Ses değil, yalnızca yazıya çevrilmiş metin bu aşamada işlenir.": "Sends STT text to an LLM hosted on Groq. Only text, not audio, is processed at this stage.",
-    "STT metnini OpenAI metin modeline gönderir. Ses değil, yalnızca yazıya çevrilmiş metin bu aşamada işlenir.": "Sends STT text to the OpenAI text model. Only text, not audio, is processed at this stage.",
-    "Vulkan, desteklenen ekran kartında yerel whisper.cpp çalıştırır. Ses cihazdan çıkmaz; AMD ve Intel GPU'lar için önerilen hızlandırma seçeneğidir.": "Vulkan runs whisper.cpp locally on supported GPUs. Audio stays on-device; recommended for AMD and Intel GPUs.",
-    "CUDA, Whisper modelini NVIDIA ekran kartında yerel olarak çalıştırır. Uyumlu NVIDIA sürücüsü ve yeterli ekran kartı belleği gerekir.": "CUDA runs the Whisper model locally on NVIDIA GPUs. Requires a compatible NVIDIA driver and sufficient VRAM.",
-    "CPU, modeli tamamen bilgisayarınızda çalıştırır. En geniş uyumluluğu ve yerel gizliliği sağlar; büyük modellerde daha yavaş olabilir.": "CPU runs the model entirely on your computer. Provides broad compatibility and total privacy, but may be slower with large models.",
-    "Bulut STT, ses kaydını seçilen sağlayıcıya yükler ve uzak bir transkripsiyon modeli kullanır. Yerel model indirilmez veya kullanılmaz.": "Cloud STT uploads recordings to your chosen provider using a remote transcription model. No local model download is required.",
-    "BULUT STT YAPILANDIRMASI • AKTİF MOTOR": "CLOUD STT CONFIGURATION • ACTIVE ENGINE",
-    "BULUT STT YAPILANDIRMASI • YEDEK MOTOR": "CLOUD STT CONFIGURATION • FALLBACK ENGINE",
-    "Ses kaydı bu sağlayıcıya gönderilir. Buradaki model yalnızca sesi yazıya çevirir; metin düzenleme modeli Metin İşleme & API sayfasında ayrı seçilir.": "Audio is sent to this provider strictly for speech-to-text. Text cleanup models are managed separately under Text Processing & API.",
-    "Bu servis yalnızca yerel STT başarısız olursa kullanılır. Bulut geçişini kapatırsanız ses cihazdan çıkmaz.": "This service is only used if local STT fails. Disabling cloud fallback keeps all audio on-device.",
-    "Groq, Whisper tabanlı uzak STT modelleri kullanır. Seçilen konuşma dili API'ye standart dil kodu olarak gönderilir.": "Groq uses remote Whisper-based STT models. The chosen spoken language code is passed directly to the API.",
-    "OpenAI dil yönlendirmesi seçilen model ailesine göre uygulanır. Özel bir model adı kullanırsanız uyumsuz dil parametresi gönderilmez.": "OpenAI language hints adapt to the selected model family. Custom model identifiers omit unsupported parameters automatically.",
-    "Gemini Audio üretken ve çok kipli bir bulut modelidir. Dil seçimi yapılandırılmış STT alanı yerine güvenli transkripsiyon talimatıyla yönlendirilir; sonuç davranışı modele bağlıdır.": "Gemini Audio is a multimodal cloud model. Language guidance uses structured system prompts rather than static language codes.",
-    "İşlem devam ediyor": "Operation in progress",
-    "Dosya transkripsiyonundan önce aktif dikte işlemini tamamlayın.": "Please complete the active dictation before starting file transcription.",
-    "Lütfen geçerli bir ses/video dosyası seçin.": "Please select a valid audio or video file.",
-    "Çeviri işlemi başlatılıyor...": "Starting transcription...",
-    "İşlem iptal ediliyor": "Cancelling...",
-    "Dosya çevirisi tamamlandı!": "File transcription completed!",
-    "Dosya transkripsiyonu tamamlandı.": "File transcription completed.",
-    "Dosya transkripsiyonu iptal edildi": "File transcription cancelled",
-    "Dosya Çeviriliyor": "Transcribing file",
-    "Dosya çevrilirken hata oluştu": "An error occurred while transcribing file",
-    "Metin kaydedildi": "Text saved",
-    "Metin panoya kopyalandı.": "Text copied to clipboard.",
-    "Model '{model}' hazır ve bilgisayarda yüklü.": "Model '{model}' is installed and ready to use.",
-    "Model '{model}' henüz bilgisayara indirilmedi.": "Model '{model}' has not been downloaded yet.",
-    "Whisper '{model}' modeli başarıyla indirildi ve kullanıma hazır.": "Whisper model '{model}' downloaded successfully and is ready to use.",
-    "Model indirilirken hata oluştu": "Error downloading model",
-    "Model hazır": "Model ready",
-    "İndiriliyor...": "Downloading...",
-    "İndirme Tamamlandı": "Download Complete",
-    "İndirme Hatası": "Download Error",
-    "Geçersiz Vulkan runtime": "Invalid Vulkan runtime",
-    "Seçilen whisper-cli.exe dosyası bulunamadı.": "Selected whisper-cli.exe file not found.",
-    "Vulkan runtime kullanılamıyor": "Vulkan runtime unavailable",
-    "Ayarlar kaydedilemedi": "Failed to save settings",
-    "Geçmişi temizle": "Clear history",
-    "Tüm dikte geçmişi kalıcı olarak silinsin mi?": "Permanently delete all dictation history?",
-    "Model dosyası indiriliyor": "Downloading model file",
-    "HuggingFace sunucusuna bağlanılıyor": "Connecting to Hugging Face",
-    "Model '{model}' başarıyla yüklendi ve hazır.": "Model '{model}' loaded successfully and is ready.",
-    "İndirme hatası": "Download error",
-    "Vulkan modeli indiriliyor": "Downloading Vulkan model",
-    "Dosya bulunamadı": "File not found",
-    "Medya akışı hazırlanıyor...": "Preparing media stream...",
-    "Ses parçası metne dönüştürülüyor...": "Transcribing audio segment...",
-    "Dosyada konuşma algılanamadı veya seçili motor yanıt vermedi.": "No speech detected in file or engine did not respond.",
-    "Çeviri tamamlandı!": "Transcription complete!",
-    "Dosyada kullanılabilir bir ses akışı bulunamadı.": "No usable audio stream found in file.",
-    "Dinleniyor...": "Listening...",
-    "Metne Çevriliyor...": "Transcribing...",
-    "Dinleniyor": "Listening",
-    "Metne çevriliyor": "Transcribing",
-    "Metin aktarıldı": "Text pasted",
-    "Metin panoya kopyalandı": "Text copied to clipboard",
-    "Ses algılanmadı": "No speech detected",
-    "Anlaşılamadı veya Model Yüklenemedi": "Speech not recognized or model failed to load",
-    "Mikrofon başlatılamadı": "Microphone initialization failed",
-    "Kontrol Paneli": "Control Panel",
-    "Dikteyi Başlat / Durdur": "Start / Stop Dictation",
-    "Çıkış": "Exit",
-    "Sistem Geneli Sesli Yazma": "System-wide Voice Typing",
-    "Kurulum tamamlanamadı": "Setup could not be completed",
-    "Seçilen yerel Whisper modelini önce indirin.": "Download the selected local Whisper model first.",
-    "Bulut STT için model ve API anahtarı gereklidir.": "Cloud STT requires a valid model and API key.",
-    "Bulut fallback için seçilen STT sağlayıcısının API anahtarı gereklidir.": "Cloud fallback requires an API key for the selected provider.",
-    "Bulut fallback için STT modeli ve sağlayıcı API anahtarı gereklidir.": "Cloud fallback requires an STT model and API key.",
-    "Bulut metin işleme için model ve API anahtarı gereklidir.": "Cloud text processing requires a model and API key.",
-    "Yerel LLM için API adresi ve model adı gereklidir.": "Local LLM processing requires an API URL and model name.",
-    "Windows kimlik bilgisi kasasına erişilemedi.": "Windows Credential Manager could not be accessed.",
-    "Seçilen yerel Whisper modeli indirilmemiş.": "Selected local Whisper model has not been downloaded.",
-    "CUDA modeli yüklenemedi. NVIDIA sürücülerini kontrol edin veya Yerel CPU motorunu seçin.": "CUDA model failed to load. Check NVIDIA drivers or select Local CPU engine.",
-    "CUDA transkripsiyonu başarısız oldu.": "CUDA transcription failed.",
-    "Motor ayarlarından uyumlu dosyayı seçin.": "Select a compatible file in engine settings.",
-    "Vulkan Whisper modeli yüklü değil": "Vulkan Whisper model is not installed",
-    "Model yöneticisinden indirin.": "Download it using the model manager.",
-    "bilinmeyen hata": "unknown error",
-    "Vulkan transkripsiyonu başarısız": "Vulkan transcription failed",
-    "İsteğe bağlı özel Vulkan runtime seç": "Select optional custom Vulkan runtime",
-    "whisper.cpp CLI (whisper-cli.exe);;Uygulamalar (*.exe)": "whisper.cpp CLI (whisper-cli.exe);;Applications (*.exe)",
-    "Ses/Video Dosyası Seç": "Select Audio/Video File",
-    "Ses ve Video Dosyaları (*.mp3 *.wav *.mp4 *.m4a *.mkv *.flac *.ogg)": "Audio & Video Files (*.mp3 *.wav *.mp4 *.m4a *.mkv *.flac *.ogg)",
-    "Metni Kaydet": "Save Text",
-    "Metin Dosyası (*.txt)": "Text File (*.txt)",
-    "Vulkan özellikli whisper-cli bulunamadı.": "Vulkan-enabled whisper-cli could not be found.",
-    "Seçilen dosya uyumlu bir whisper.cpp CLI değil.": "Selected file is not a compatible whisper.cpp CLI.",
-    "Seçilen whisper.cpp runtime Vulkan backend içermiyor.": "Selected whisper.cpp runtime lacks Vulkan backend support.",
-    "Vulkan runtime doğrulanamadı": "Vulkan runtime could not be validated",
-    "Dahili Vulkan runtime hazır": "Bundled Vulkan runtime is ready",
-    "Vulkan runtime eksik dosya içeriyor": "Vulkan runtime is missing required files",
-    "Vulkan runtime bütünlük kontrolü başarısız": "Vulkan runtime integrity check failed",
-    "Vulkan runtime manifesti okunamadı": "Vulkan runtime manifest could not be read",
-    "STT isteği başarısız oldu": "STT request failed",
-    "için geçerli API anahtarı bulunamadı.": "does not have a valid API key.",
+MESSAGES = {
+    key: {"tr": TR[key], "en": EN_CATALOG[key]}
+    for key in sorted(TR)
 }
 
-REVERSE_EN = {v: k for k, v in EN.items()}
+# Static widget literals are progressively moving to semantic keys. Legacy
+# literals already have deterministic legacy.<sha1> keys in the JSON catalogs,
+# so runtime translation never relies on a reverse English-to-Turkish map.
+EN = {
+    TR[key]: EN_CATALOG[key]
+    for key in TR
+    if key.startswith("legacy.")
+}
+LEGACY_TEXT_KEYS = {}
+for key in TR:
+    if not key.startswith("legacy."):
+        continue
+    LEGACY_TEXT_KEYS[TR[key]] = key
+    LEGACY_TEXT_KEYS.setdefault(EN_CATALOG[key], key)
 
 
 def set_language(language: str):
@@ -305,7 +59,14 @@ def get_language() -> str:
     return _language
 
 
-def t(text: str) -> str:
-    if _language == "en":
-        return EN.get(text, text)
-    return REVERSE_EN.get(text, text)
+def translate(key: str, **values) -> str:
+    translations = MESSAGES.get(key)
+    if translations is None:
+        raise KeyError(f"Unknown translation key: {key}")
+    text = translations[_language]
+    return text.format(**values) if values else text
+
+
+def legacy_translation_key(text: str):
+    """Resolve a static widget literal to its deterministic catalog key."""
+    return LEGACY_TEXT_KEYS.get(text)

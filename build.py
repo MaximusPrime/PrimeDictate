@@ -15,6 +15,35 @@ from src.metadata import (
 )
 
 
+REQUIRED_BUILD_PATHS = (
+    "run.py",
+    "PrimeDictate-Logo.ico",
+    "PrimeDictate-Logo.png",
+    "PrimeDictate.spec",
+    "PrimeDictate-Portable.spec",
+    "installer.iss",
+    os.path.join("assets", "PrimeDictate-AppIcon.png"),
+    os.path.join("assets", "maximus-prime-software.png"),
+    os.path.join("src", "locales", "tr.json"),
+    os.path.join("src", "locales", "en.json"),
+    os.path.join("runtime", "whisper-vulkan", "SHA256SUMS"),
+)
+
+
+def validate_build_inputs(project_root=None):
+    project_root = project_root or os.path.dirname(os.path.abspath(__file__))
+    missing = [path for path in REQUIRED_BUILD_PATHS if not os.path.isfile(os.path.join(project_root, path))]
+    if missing:
+        raise RuntimeError(f"Missing required build inputs: {', '.join(missing)}")
+    for spec_name in ("PrimeDictate.spec", "PrimeDictate-Portable.spec"):
+        spec_text = open(os.path.join(project_root, spec_name), encoding="utf-8").read()
+        if "primedictate-version-" in spec_text or "C:\\Users\\" in spec_text:
+            raise RuntimeError(f"{spec_name} contains a machine-specific path")
+        if "PRIMEDICTATE_VERSION_FILE" not in spec_text:
+            raise RuntimeError(f"{spec_name} does not use the generated version file")
+    return True
+
+
 def write_version_file(path, executable_name):
     version_parts = [int(part) for part in VERSION.split(".")]
     if len(version_parts) > 4:
@@ -61,17 +90,8 @@ def build():
     print("==========================================")
 
     project_root = os.path.dirname(os.path.abspath(__file__))
+    validate_build_inputs(project_root)
     venv_py = sys.executable
-
-    logo_path = os.path.join(project_root, "PrimeDictate-Logo.png")
-    icon_path = os.path.join(project_root, "PrimeDictate-Logo.ico")
-    run_py = os.path.join(project_root, "run.py")
-    logo_arg = os.path.basename(logo_path)
-    icon_arg = os.path.basename(icon_path)
-    run_arg = os.path.basename(run_py)
-    runtime_arg = "runtime"
-    studio_logo_arg = os.path.join("assets", "maximus-prime-software.png")
-    app_icon_arg = os.path.join("assets", "PrimeDictate-AppIcon.png")
 
     version_dir = tempfile.TemporaryDirectory(prefix="primedictate-version-")
     portable_version_file = os.path.join(version_dir.name, "portable-version.txt")
@@ -81,22 +101,10 @@ def build():
 
     # 1. Build Portable (.exe)
     print("\n[1/3] Building Portable Edition (PrimeDictate-Portable.exe)...")
-    cmd_portable = [
-        venv_py, "-m", "PyInstaller",
-        "-y",
-        "--noconsole",
-        "--onefile",
-        f"--icon={icon_arg}",
-        f"--add-data={logo_arg};.",
-        f"--add-data={studio_logo_arg};assets",
-        f"--add-data={app_icon_arg};assets",
-        f"--add-data={runtime_arg};runtime",
-        f"--version-file={portable_version_file}",
-        f"--name={APP_NAME}-Portable",
-        "--clean",
-        run_arg
-    ]
-    res1 = subprocess.run(cmd_portable, cwd=project_root)
+    portable_env = os.environ.copy()
+    portable_env["PRIMEDICTATE_VERSION_FILE"] = portable_version_file
+    cmd_portable = [venv_py, "-m", "PyInstaller", "--noconfirm", "--clean", "PrimeDictate-Portable.spec"]
+    res1 = subprocess.run(cmd_portable, cwd=project_root, env=portable_env)
     if res1.returncode == 0:
         print("✓ Portable Edition built successfully in 'dist/PrimeDictate-Portable.exe'")
     else:
@@ -104,21 +112,10 @@ def build():
 
     # 2. Build Directory Edition
     print("\n[2/3] Building Directory Edition (dist/PrimeDictate)...")
-    cmd_dir = [
-        venv_py, "-m", "PyInstaller",
-        "-y",
-        "--noconsole",
-        "--onedir",
-        f"--icon={icon_arg}",
-        f"--add-data={logo_arg};.",
-        f"--add-data={studio_logo_arg};assets",
-        f"--add-data={app_icon_arg};assets",
-        f"--add-data={runtime_arg};runtime",
-        f"--version-file={directory_version_file}",
-        f"--name={APP_NAME}",
-        run_arg
-    ]
-    res2 = subprocess.run(cmd_dir, cwd=project_root)
+    directory_env = os.environ.copy()
+    directory_env["PRIMEDICTATE_VERSION_FILE"] = directory_version_file
+    cmd_dir = [venv_py, "-m", "PyInstaller", "--noconfirm", "--clean", "PrimeDictate.spec"]
+    res2 = subprocess.run(cmd_dir, cwd=project_root, env=directory_env)
     if res2.returncode == 0:
         print("✓ Directory Edition built successfully in 'dist/PrimeDictate'")
 
@@ -141,7 +138,7 @@ def build():
         res3 = None
         print("Inno Setup ISCC compiler not found, skipping setup.exe creation.")
 
-    if res1.returncode != 0 or res2.returncode != 0 or (res3 and res3.returncode != 0):
+    if res1.returncode != 0 or res2.returncode != 0:
         raise SystemExit(1)
 
     print("\n==========================================")
@@ -149,4 +146,8 @@ def build():
     print("==========================================")
 
 if __name__ == "__main__":
-    build()
+    if "--check" in sys.argv:
+        validate_build_inputs()
+        print("Build inputs are valid.")
+    else:
+        build()
