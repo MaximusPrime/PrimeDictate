@@ -4,7 +4,7 @@ import logging
 import threading
 import weakref
 import shiboken6
-from PySide6.QtCore import Qt, Signal, QUrl, QTimer
+from PySide6.QtCore import QByteArray, Qt, Signal, QUrl, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -196,7 +196,12 @@ class MainWindow(QMainWindow):
         self.hardware_detection_signal.connect(self._apply_hardware_capabilities)
         set_language(config_manager.get("ui_language", "en"))
         self.setWindowTitle(translate("app.window_title"))
-        self.resize(1180, 760)
+        self._geometry_ready = False
+        self._geometry_save_timer = QTimer(self)
+        self._geometry_save_timer.setSingleShot(True)
+        self._geometry_save_timer.setInterval(400)
+        self._geometry_save_timer.timeout.connect(self._save_window_geometry)
+        self.resize(1320, 820)
         self.setMinimumSize(960, 640)
         self.setStyleSheet(PREMIUM_STYLE)
 
@@ -213,6 +218,8 @@ class MainWindow(QMainWindow):
         self._setup_log_stream()
         self._connect_model_manager_signals()
         self._start_hardware_detection()
+        self._restore_window_geometry()
+        self._geometry_ready = True
 
     def _setup_accessibility(self):
         self._apply_accessible_translations()
@@ -255,6 +262,29 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_responsive_layout()
+        self._schedule_geometry_save()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self._schedule_geometry_save()
+
+    def _schedule_geometry_save(self):
+        if getattr(self, "_geometry_ready", False) and not self.isMaximized() and not self.isMinimized():
+            self._geometry_save_timer.start()
+
+    def _save_window_geometry(self):
+        geometry = bytes(self.saveGeometry().toBase64()).decode("ascii")
+        config_manager.update({"main_window_geometry": geometry})
+
+    def _restore_window_geometry(self):
+        geometry = config_manager.get("main_window_geometry", None)
+        if not isinstance(geometry, str) or not geometry:
+            return
+        try:
+            if not self.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii"))):
+                logger.warning("Stored main-window geometry could not be restored.")
+        except (TypeError, ValueError):
+            logger.warning("Stored main-window geometry is invalid.")
 
     def _setup_ui(self):
         central_widget = QWidget()

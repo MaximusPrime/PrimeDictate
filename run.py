@@ -21,6 +21,7 @@ from src.ui.main_window import MainWindow
 from src.ui.floating_overlay import FloatingOverlay
 from src.ui.tray_icon import SystemTrayManager
 from src.logging_config import configure_logging
+from src.startup import configure_start_with_windows
 
 # Configure bounded, redacted file and console logging before app startup.
 LOG_PATH = configure_logging(APP_DIR)
@@ -42,6 +43,7 @@ class AppSignals(QObject):
     audio_level = Signal(float)
     status_changed = Signal(str, str)
     recording_limit_reached = Signal()
+    model_memory_finished = Signal(bool, bool, str)  # loading, success, detail
 
 class PrimeDictateApp(QObject):
     def __init__(self):
@@ -80,7 +82,20 @@ class PrimeDictateApp(QObject):
         # UI Elements
         self.main_window = MainWindow(app_controller=self)
         self.overlay = FloatingOverlay(start_callback=self.start_dictation, stop_callback=self.stop_dictation)
-        self.tray = SystemTrayManager(main_window=self.main_window, toggle_callback=self.toggle_dictation)
+        self._model_memory_busy = False
+        self.tray = SystemTrayManager(
+            main_window=self.main_window,
+            toggle_callback=self.toggle_dictation,
+            model_memory_callback=self.toggle_model_memory,
+        )
+
+        # Refresh older Run entries so existing users also receive the
+        # --start-hidden startup behavior after upgrading.
+        if config_manager.get("start_with_windows", False):
+            try:
+                configure_start_with_windows(True)
+            except OSError:
+                logger.warning("Could not refresh the Windows startup entry.", exc_info=True)
 
         # Hotkey Listener
         self.hotkey_listener = HotkeyListener(
@@ -91,6 +106,7 @@ class PrimeDictateApp(QObject):
         self._connect_signals()
         self.reload_settings()
         self.engine_manager.start_warmup()
+        QTimer.singleShot(250, self._poll_model_warmup)
 
     def _connect_signals(self):
         self.signals.recording_started.connect(self._on_recording_started)
@@ -99,6 +115,7 @@ class PrimeDictateApp(QObject):
         self.signals.audio_level.connect(self._on_audio_level)
         self.signals.status_changed.connect(self._on_status_changed)
         self.signals.recording_limit_reached.connect(self._on_recording_limit_reached)
+        self.signals.model_memory_finished.connect(self._on_model_memory_finished)
 
         self.main_window.request_toggle_dictation.connect(self.toggle_dictation)
 
@@ -127,6 +144,55 @@ class PrimeDictateApp(QObject):
             self.start_dictation()
         elif self.state == AppState.RECORDING:
             self.stop_dictation()
+
+    def _sync_tray_model_memory(self):
+        backend = config_manager.get("stt_backend", "cpu")
+        self.tray.set_model_memory_state(
+            backend,
+            self.engine_manager.is_model_resident(backend),
+            self._model_memory_busy or self.engine_manager.is_warmup_active(),
+        )
+
+    def _poll_model_warmup(self):
+        self._sync_tray_model_memory()
+        if self.engine_manager.is_warmup_active() and not self._shutdown_requested.is_set():
+            QTimer.singleShot(500, self._poll_model_warmup)
+
+    def toggle_model_memory(self):
+        backend = config_manager.get("stt_backend", "cpu")
+        if (
+            backend not in {"cuda", "vulkan"}
+            or self.state != AppState.IDLE
+            or self._model_memory_busy
+            or self.engine_manager.is_warmup_active()
+        ):
+            return
+        loading = not self.engine_manager.is_model_resident(backend)
+        self._model_memory_busy = True
+        self._sync_tray_model_memory()
+
+        def worker():
+            try:
+                if loading:
+                    self.engine_manager.load_selected_model(backend)
+                else:
+                    self.engine_manager.unload_model(backend)
+                self.signals.model_memory_finished.emit(loading, True, "")
+            except Exception as exc:
+                logger.exception("Model memory operation failed.")
+                self.signals.model_memory_finished.emit(loading, False, str(exc))
+
+        threading.Thread(target=worker, daemon=True, name="ModelMemoryOperation").start()
+
+    @Slot(bool, bool, str)
+    def _on_model_memory_finished(self, loading: bool, success: bool, detail: str):
+        self._model_memory_busy = False
+        self._sync_tray_model_memory()
+        if success:
+            key = "tray.notice.model_loaded" if loading else "tray.notice.vram_released"
+            self.tray.show_message("PrimeDictate", translate(key))
+        else:
+            self.tray.show_message("PrimeDictate", translate("tray.notice.model_memory_error", detail=detail))
 
     def start_dictation_from_hotkey(self):
         self.signals.recording_started.emit()
@@ -306,6 +372,7 @@ class PrimeDictateApp(QObject):
                 state.value,
                 enabled=config_manager.get("setup_completed", False),
             )
+            self._sync_tray_model_memory()
         if state == AppState.SUCCESS:
             QTimer.singleShot(1500, lambda: self._set_state(AppState.IDLE, translate("status.ready")))
 
@@ -331,7 +398,9 @@ class PrimeDictateApp(QObject):
         self.hotkey_listener.sync_recording_state(False)
 
     def run(self):
-        self.main_window.show()
+        start_hidden = "--start-hidden" in sys.argv and config_manager.get("setup_completed", False)
+        if not start_hidden:
+            self.main_window.show()
         sys.exit(self.app.exec())
 
     def quit(self):

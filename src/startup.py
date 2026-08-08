@@ -16,11 +16,11 @@ def configure_start_with_windows(enabled: bool):
     ) as key:
         if enabled:
             if getattr(sys, "frozen", False):
-                command = f'"{sys.executable}"'
+                command = f'"{sys.executable}" --start-hidden'
             else:
                 pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
                 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                command = f'"{pythonw}" "{os.path.join(project_root, "run.py")}"'
+                command = f'"{pythonw}" "{os.path.join(project_root, "run.py")}" --start-hidden'
             winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command)
         else:
             try:

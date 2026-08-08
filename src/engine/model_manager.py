@@ -96,7 +96,9 @@ class ModelManager(QObject):
                 self._is_downloading = False
 
     def _download_faster_whisper_model(self, model_name: str, backend: str):
-        from faster_whisper.utils import download_model
+        from faster_whisper.utils import _MODELS
+        from huggingface_hub import snapshot_download
+        from tqdm.auto import tqdm
 
         self.progress.emit(-1, translate("model.progress.connecting_huggingface", model=model_name))
         model_path = self.get_model_path(model_name, backend)
@@ -105,7 +107,36 @@ class ModelManager(QObject):
         staging_path = tempfile.mkdtemp(prefix=f".{model_name}-", suffix=".download", dir=parent_dir)
         backup_path = None
         try:
-            download_model(model_name, output_dir=staging_path)
+            manager = self
+
+            class DownloadProgress(tqdm):
+                """Forward Hugging Face model-file progress to the Qt UI."""
+
+                def __init__(self, *args, **kwargs):
+                    kwargs["disable"] = True
+                    super().__init__(*args, **kwargs)
+                    self._prime_downloaded = self.n
+
+                def update(self, amount=1):
+                    displayed = super().update(amount)
+                    self._prime_downloaded += amount
+                    if self.total and self.total > 1024 * 1024:
+                        percent = min(99, int(self._prime_downloaded * 100 / self.total))
+                        manager.progress.emit(
+                            percent,
+                            translate("model.progress.downloading_percent", model=model_name, percent=percent),
+                        )
+                    return displayed
+
+            snapshot_download(
+                _MODELS.get(model_name, model_name),
+                local_dir=staging_path,
+                allow_patterns=(
+                    "config.json", "preprocessor_config.json", "model.bin",
+                    "tokenizer.json", "vocabulary.*",
+                ),
+                tqdm_class=DownloadProgress,
+            )
             self._validate_faster_whisper_model(staging_path)
             if os.path.exists(model_path):
                 backup_path = tempfile.mkdtemp(prefix=f".{model_name}-", suffix=".backup", dir=parent_dir)

@@ -6,11 +6,15 @@ from src.i18n import translate
 from src.ui.brand import app_mark_pixmap
 
 class SystemTrayManager:
-    def __init__(self, main_window, toggle_callback=None):
+    def __init__(self, main_window, toggle_callback=None, model_memory_callback=None):
         self.main_window = main_window
         self.toggle_callback = toggle_callback
+        self.model_memory_callback = model_memory_callback
         self._dictation_state = "idle"
         self._dictation_enabled = True
+        self._model_backend = "cpu"
+        self._model_resident = False
+        self._model_memory_busy = False
 
         logo_path = get_resource_path(os.path.join("assets", "PrimeDictate-AppIcon.png"))
         if os.path.exists(logo_path):
@@ -33,6 +37,11 @@ class SystemTrayManager:
         self.toggle_action = menu.addAction(translate("tray.start_dictation"))
         if self.toggle_callback:
             self.toggle_action.triggered.connect(self.toggle_callback)
+
+        self.model_memory_action = menu.addAction(translate("tray.release_vram"))
+        if self.model_memory_callback:
+            self.model_memory_action.triggered.connect(self.model_memory_callback)
+        self.model_memory_action.setVisible(False)
 
         menu.addSeparator()
 
@@ -57,11 +66,34 @@ class SystemTrayManager:
         self.history_action.setText(translate("tray.open_history"))
         self.exit_action.setText(translate("tray.exit"))
         self._refresh_toggle_action()
+        self._refresh_model_memory_action()
 
     def set_dictation_state(self, state: str, enabled: bool = True):
         self._dictation_state = state
         self._dictation_enabled = enabled
         self._refresh_toggle_action()
+        self._refresh_model_memory_action()
+
+    def set_model_memory_state(self, backend: str, resident: bool, busy: bool = False):
+        self._model_backend = backend
+        self._model_resident = resident
+        self._model_memory_busy = busy
+        self._refresh_model_memory_action()
+
+    def _refresh_model_memory_action(self):
+        supported = self._model_backend in {"cuda", "vulkan"}
+        self.model_memory_action.setVisible(supported)
+        if not supported:
+            return
+        if self._model_memory_busy:
+            key = "tray.model_memory_busy"
+        elif self._model_resident:
+            key = "tray.release_vram"
+        else:
+            key = "tray.load_model"
+        self.model_memory_action.setText(translate(key))
+        can_change = self._dictation_state == "idle" and not self._model_memory_busy
+        self.model_memory_action.setEnabled(bool(self.model_memory_callback) and can_change)
 
     def _refresh_toggle_action(self):
         if self._dictation_state == "recording":

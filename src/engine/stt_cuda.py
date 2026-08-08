@@ -1,4 +1,5 @@
 import logging
+import gc
 import numpy as np
 from src.engine.stt_base import BaseSTTEngine, TranscriptionCancelled
 from src.engine.model_manager import model_manager
@@ -45,6 +46,16 @@ class CUDASTTEngine(BaseSTTEngine):
         raise RuntimeError(
             translate("cuda.error.model_load")
         ) from last_error
+
+    def is_model_resident(self) -> bool:
+        return self.model is not None
+
+    def unload_model(self):
+        self.model = None
+        self.model_name = None
+        self.last_inference_device = None
+        gc.collect()
+        logger.info("CUDA Whisper model released from VRAM.")
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "tr", cancel_check=None) -> str:
         if len(audio) == 0:

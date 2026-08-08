@@ -105,6 +105,14 @@ class VulkanSTTEngine(BaseSTTEngine):
         self._stop_server()
         self._server_session.close()
 
+    def is_model_resident(self) -> bool:
+        process = self._server_process
+        return process is not None and process.poll() is None
+
+    def unload_model(self):
+        self._stop_server()
+        logger.info("Persistent Vulkan model server stopped; VRAM released.")
+
     def _ensure_server(self) -> bool:
         with self._server_lock:
             return self._ensure_server_locked()

@@ -503,6 +503,20 @@ class ProviderTransportTests(unittest.TestCase):
 
 
 class CUDASTTTests(unittest.TestCase):
+    def test_cuda_model_can_be_released_from_vram(self):
+        engine = CUDASTTEngine()
+        engine.model = Mock()
+        engine.model_name = "base"
+        engine.last_inference_device = "CUDA"
+
+        with patch("src.engine.stt_cuda.gc.collect") as collect:
+            engine.unload_model()
+
+        self.assertFalse(engine.is_model_resident())
+        self.assertIsNone(engine.model_name)
+        self.assertIsNone(engine.last_inference_device)
+        collect.assert_called_once_with()
+
     def test_cuda_compute_type_preference_uses_only_supported_types(self):
         result = preferred_cuda_compute_types({"int8", "float32", "int8_float16"})
         self.assertEqual(result, ("int8_float16", "int8", "float32"))
@@ -536,6 +550,17 @@ class CUDASTTTests(unittest.TestCase):
 
 
 class VulkanSTTTests(unittest.TestCase):
+    def test_vulkan_model_can_be_released_from_vram(self):
+        engine = VulkanSTTEngine()
+        engine._server_process = Mock()
+        engine._server_process.poll.return_value = None
+        self.assertTrue(engine.is_model_resident())
+
+        with patch.object(engine, "_stop_server") as stop_server:
+            engine.unload_model()
+
+        stop_server.assert_called_once_with()
+
     def test_vulkan_engine_invokes_whisper_cli_with_selected_model(self):
         engine = VulkanSTTEngine()
         engine.executable = "whisper-cli.exe"
@@ -877,19 +902,19 @@ class ModelStorageTests(unittest.TestCase):
 
     def test_faster_whisper_download_uses_prime_dictate_model_directory(self):
         manager = ModelManager()
-        def create_model(_name, output_dir):
+        def create_model(_repo_id, local_dir, **_kwargs):
             for filename in ("config.json", "model.bin", "tokenizer.json"):
-                with open(os.path.join(output_dir, filename), "wb") as model_file:
+                with open(os.path.join(local_dir, filename), "wb") as model_file:
                     model_file.write(b"test")
 
         with tempfile.TemporaryDirectory() as temp_dir, \
              patch.object(manager, "get_model_path", return_value=os.path.join(temp_dir, "base")) as model_path, \
-             patch("faster_whisper.utils.download_model", side_effect=create_model) as download, \
+             patch("huggingface_hub.snapshot_download", side_effect=create_model) as download, \
              patch.object(manager, "_validate_faster_whisper_model") as validate:
             manager._download_worker("base", "cpu")
 
         model_path.assert_called_once_with("base", "cpu")
-        staging_path = download.call_args.kwargs["output_dir"]
+        staging_path = download.call_args.kwargs["local_dir"]
         self.assertNotEqual(staging_path, os.path.join(temp_dir, "base"))
         validate.assert_called_once_with(staging_path)
 
@@ -902,7 +927,7 @@ class ModelStorageTests(unittest.TestCase):
             with open(marker, "w", encoding="utf-8") as model_file:
                 model_file.write("healthy")
             with patch.object(manager, "get_model_path", return_value=model_path), \
-                 patch("faster_whisper.utils.download_model"), \
+                 patch("huggingface_hub.snapshot_download"), \
                  patch.object(manager, "_validate_faster_whisper_model", side_effect=RuntimeError("invalid")):
                 manager._download_worker("base", "cpu")
             self.assertTrue(os.path.isfile(marker))

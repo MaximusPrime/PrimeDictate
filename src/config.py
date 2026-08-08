@@ -156,7 +156,8 @@ DEFAULT_CONFIG = {
     "overlay_always_on": False,
     "ui_font_size": "normal",  # "small", "normal", "large"
     "allow_cloud_fallback": False,
-    "overlay_position": None
+    "overlay_position": None,
+    "main_window_geometry": None
 }
 
 class ConfigManager:

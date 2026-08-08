@@ -51,6 +51,35 @@ class EngineManager:
                     logger.exception("Could not close transcription engine cleanly.")
         self.engines.clear()
 
+    def is_model_resident(self, backend: str = None) -> bool:
+        backend = backend or config_manager.get("stt_backend", "cpu")
+        engine = self.engines.get(backend)
+        check = getattr(engine, "is_model_resident", None)
+        return bool(check()) if callable(check) else False
+
+    def is_warmup_active(self) -> bool:
+        return bool(self._warmup_thread and self._warmup_thread.is_alive())
+
+    def unload_model(self, backend: str = None):
+        backend = backend or config_manager.get("stt_backend", "cpu")
+        engine = self.engines.get(backend)
+        unload = getattr(engine, "unload_model", None)
+        if callable(unload):
+            unload()
+
+    def load_selected_model(self, backend: str = None):
+        backend = backend or config_manager.get("stt_backend", "cpu")
+        if backend not in {"cuda", "vulkan"}:
+            return
+        engine = self.get_engine(backend)
+        engine.load_model(
+            config_manager.get("model_size", "base"),
+            _validated_language(config_manager.get("language", "tr")),
+        )
+        warmup = getattr(engine, "warmup", None)
+        if callable(warmup):
+            warmup()
+
     def start_warmup(self):
         backend = config_manager.get("stt_backend", "cpu")
         if backend == "cloud":
