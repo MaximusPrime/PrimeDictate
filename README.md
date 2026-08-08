@@ -35,7 +35,7 @@ PrimeDictate records from a global hotkey, transcribes with the selected local o
 - Chunked, cancellable media transcription with overlap de-duplication and TXT/SRT/VTT/JSON export.
 - Focus-safe paste, clipboard restoration, searchable local history, and a draggable multi-monitor overlay with explicit processing/ready feedback.
 - Credentials in Windows Credential Manager, redacted rotating logs, and privacy-safe diagnostic ZIPs.
-- State-aware system tray controls and single-instance application lifecycle.
+- State-aware system tray controls, including on-demand CUDA/Vulkan VRAM release for gaming, and single-instance application lifecycle.
 
 ## Screenshots
 
@@ -48,6 +48,12 @@ Floating dictation control:
 <p align="center">
   <img src="docs/images/primedictate-floating-overlay.png" alt="Floating dictation overlay" width="180">
 </p>
+
+GPU model memory controls:
+
+| Model loaded — release VRAM for gaming | VRAM released — reload the dictation model |
+|---|---|
+| <img src="docs/images/primedictate-tray-release-vram.png" alt="System tray action to release dictation model VRAM for gaming" width="181"> | <img src="docs/images/primedictate-tray-load-model.png" alt="System tray action to load the dictation model into GPU memory" width="137"> |
 
 ## How the Pipeline Works
 
@@ -80,6 +86,8 @@ Cloud fallback is disabled by default and requires explicit consent. When enable
 CPU and GPU can be changed later in **Speech to Text**; the first-run choice is not permanent. PrimeDictate validates the chosen backend, reports the detected device, and prevents incompatible model/backend combinations.
 
 PrimeDictate warms the selected local engine in the background after startup. The bundled Vulkan path keeps the selected GGML model in a loopback-only `whisper-server` process, avoiding repeated process and model-loading cost during consecutive dictation. If the persistent server cannot start or answer, PrimeDictate automatically falls back to its verified one-shot CLI path. CPU may still win on some systems, and CUDA is typically preferred on a supported NVIDIA GPU; measure on the target hardware because model size, driver, CPU, GPU, and recording length all matter.
+
+When using CUDA or Vulkan, the system tray provides a state-aware **Game Mode — Release VRAM** action. It safely unloads the idle dictation model so games can use the GPU memory; the same action changes to **Load Dictation Model** when memory has been released. The control is disabled during recording, transcription, model loading, and startup warmup, and is hidden for CPU and cloud engines.
 
 The floating control shows **Transcribing** while a result is pending. As soon as the result is available, dictation returns to idle immediately and the Play control becomes available; no artificial success cooldown is imposed. Diagnostic logs include `Dictation stop-to-result latency=...` for end-to-end measurement.
 
