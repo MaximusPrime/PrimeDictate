@@ -387,6 +387,4 @@ class MainWindowSettingsMixin:
         else:
             key = "settings.admin_status.standard"
         detail = translate(key)
-        if self.admin_mode_cb.isChecked() and self.start_windows_cb.isChecked():
-            detail += " " + translate("settings.admin_status.startup_scheduled")
         self.admin_mode_status.setText(detail)
