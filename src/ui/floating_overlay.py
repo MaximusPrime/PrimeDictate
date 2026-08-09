@@ -1,7 +1,7 @@
 import math
 
 from PySide6.QtCore import QPoint, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QCursor, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
@@ -169,6 +169,18 @@ class FloatingOverlay(QWidget):
     OVERLAY_HEIGHT = 75
     CONTROL_IDLE_WIDTH = 104
     CONTROL_RECORDING_WIDTH = 166
+    STATUS_MIN_WIDTH = 48
+    STATUS_MAX_WIDTH = 196
+    STATUS_HORIZONTAL_CHROME = 24
+    STATUS_MESSAGE_KEYS = (
+        "overlay.status.ready",
+        "overlay.status.listening",
+        "overlay.status.copied",
+        "overlay.status.error",
+        "overlay.status.pasted",
+        "overlay.status.preparing_model",
+        "overlay.status.transcribing",
+    )
 
     def __init__(self, start_callback=None, stop_callback=None):
         super().__init__()
@@ -188,6 +200,7 @@ class FloatingOverlay(QWidget):
         self._processing_active = False
 
         self._setup_ui()
+        self.set_status(translate("overlay.status.ready"), "#edf0f3")
         self._load_position()
         self.hide()
 
@@ -198,7 +211,7 @@ class FloatingOverlay(QWidget):
 
         self.status_label = QLabel(translate("overlay.status.ready"))
         self.status_label.setObjectName("overlayStatus")
-        self.status_label.setFixedSize(196, 27)
+        self.status_label.setFixedSize(self.STATUS_MIN_WIDTH, 27)
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(False)
         self.status_label.setStyleSheet("""
@@ -330,6 +343,19 @@ class FloatingOverlay(QWidget):
             }
             """
         )
+        metrics = QFontMetrics(self.status_label.font())
+        longest_message = max(
+            (translate(key) for key in self.STATUS_MESSAGE_KEYS),
+            key=metrics.horizontalAdvance,
+        )
+        fixed_width = max(
+            self.STATUS_MIN_WIDTH,
+            min(
+                self.STATUS_MAX_WIDTH,
+                metrics.horizontalAdvance(longest_message) + self.STATUS_HORIZONTAL_CHROME,
+            ),
+        )
+        self.status_label.setFixedWidth(fixed_width)
         self.status_label.setToolTip(tooltip_text or text)
 
     def set_recording_active(self, active: bool):

@@ -79,14 +79,14 @@ class SystemTrayManager:
         self._refresh_model_memory_action()
 
     def _refresh_model_memory_action(self):
-        supported = self._model_backend in {"cuda", "vulkan"}
+        supported = self._model_backend in {"cpu", "cuda", "vulkan"}
         self.model_memory_action.setVisible(supported)
         if not supported:
             return
         if self._model_memory_busy:
             key = "tray.model_memory_busy"
         elif self._model_resident:
-            key = "tray.release_vram"
+            key = "tray.release_ram" if self._model_backend == "cpu" else "tray.release_vram"
         else:
             key = "tray.load_model"
         self.model_memory_action.setText(translate(key))

@@ -10,6 +10,10 @@ from src.config import APP_DIR
 
 logger = logging.getLogger("PrimeDictate.ModelManager")
 
+
+class ModelDownloadCancelled(Exception):
+    """Internal cooperative-cancellation signal for model downloads."""
+
 VULKAN_MODEL_FILES = {
     "tiny": "ggml-tiny.bin",
     "base": "ggml-base.bin",
@@ -40,6 +44,22 @@ class ModelManager(QObject):
         super().__init__()
         self._is_downloading = False
         self._download_lock = threading.Lock()
+        self._download_cancel = threading.Event()
+
+    def is_downloading(self) -> bool:
+        with self._download_lock:
+            return self._is_downloading
+
+    def cancel_download(self) -> bool:
+        with self._download_lock:
+            if not self._is_downloading:
+                return False
+            self._download_cancel.set()
+            return True
+
+    def _raise_if_cancelled(self):
+        if self._download_cancel.is_set():
+            raise ModelDownloadCancelled()
 
     def get_model_path(self, model_name: str, backend: str):
         if model_name not in supported_models(backend):
@@ -72,6 +92,7 @@ class ModelManager(QObject):
             if self._is_downloading:
                 return False
             self._is_downloading = True
+            self._download_cancel.clear()
         threading.Thread(target=self._download_worker, args=(model_name, backend), daemon=True).start()
         return True
 
@@ -87,6 +108,10 @@ class ModelManager(QObject):
             
             self.progress.emit(100, translate("model.progress.ready", model=model_name))
             self.download_finished.emit(backend, model_name, True, "")
+        except ModelDownloadCancelled:
+            logger.info("Model download cancelled for '%s' (%s).", model_name, backend)
+            self.progress.emit(0, translate("model.status.cancelled"))
+            self.download_finished.emit(backend, model_name, False, "__cancelled__")
         except Exception as e:
             logger.error(f"Failed to download model '{model_name}': {e}")
             self.progress.emit(0, translate("model.error.download", detail=e))
@@ -94,6 +119,7 @@ class ModelManager(QObject):
         finally:
             with self._download_lock:
                 self._is_downloading = False
+                self._download_cancel.clear()
 
     def _download_faster_whisper_model(self, model_name: str, backend: str):
         from faster_whisper.utils import _MODELS
@@ -118,6 +144,7 @@ class ModelManager(QObject):
                     self._prime_downloaded = self.n
 
                 def update(self, amount=1):
+                    manager._raise_if_cancelled()
                     displayed = super().update(amount)
                     self._prime_downloaded += amount
                     if self.total and self.total > 1024 * 1024:
@@ -128,6 +155,7 @@ class ModelManager(QObject):
                         )
                     return displayed
 
+            self._raise_if_cancelled()
             snapshot_download(
                 _MODELS.get(model_name, model_name),
                 local_dir=staging_path,
@@ -137,6 +165,7 @@ class ModelManager(QObject):
                 ),
                 tqdm_class=DownloadProgress,
             )
+            self._raise_if_cancelled()
             self._validate_faster_whisper_model(staging_path)
             if os.path.exists(model_path):
                 backup_path = tempfile.mkdtemp(prefix=f".{model_name}-", suffix=".backup", dir=parent_dir)
@@ -180,6 +209,7 @@ class ModelManager(QObject):
                 downloaded = 0
                 with open(partial_path, "wb") as model_file:
                     for block in response.iter_content(chunk_size=1024 * 1024):
+                        self._raise_if_cancelled()
                         if not block:
                             continue
                         model_file.write(block)
@@ -187,6 +217,7 @@ class ModelManager(QObject):
                         if total_size:
                             percent = min(99, int(downloaded * 100 / total_size))
                             self.progress.emit(percent, translate("model.progress.downloading_vulkan", percent=percent))
+            self._raise_if_cancelled()
             if os.path.getsize(partial_path) <= 1024 * 1024:
                 raise RuntimeError(translate("model.error.invalid_vulkan_file"))
             os.replace(partial_path, target_path)

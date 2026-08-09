@@ -129,14 +129,21 @@ class MainWindowModelsMixin:
             self.download_model_btn.setText(translate("model.action.download_selected"))
 
     def download_selected_model(self):
+        if self.model_manager.is_downloading():
+            if self.model_manager.cancel_download():
+                self.download_model_btn.setEnabled(False)
+                self.download_model_btn.setText(translate("model.status.cancelling"))
+                self.model_status_label.setText(translate("model.status.cancelling"))
+            return
         model_name = self.model_combo.currentData() or self.model_combo.currentText()
         backend = self.backend_combo.currentData()
-        self.download_model_btn.setEnabled(False)
-        self.download_model_btn.setText(translate("model.status.downloading"))
         if not self.model_manager.download_model_async(model_name, backend):
             self.download_model_btn.setEnabled(True)
             self.download_model_btn.setText(translate("model.action.download_selected"))
             self.status_label.setText(translate("model.status.download_already_running"))
+            return
+        self.download_model_btn.setEnabled(True)
+        self.download_model_btn.setText(translate("model.action.cancel_download"))
 
     def _on_model_progress(self, percent: int, msg: str):
         if percent < 0:
@@ -153,6 +160,10 @@ class MainWindowModelsMixin:
             QMessageBox.information(self, translate("model.dialog.download_complete"), translate("model.dialog.ready", model=model_name))
             if backend == self.backend_combo.currentData():
                 self.check_selected_model_status(model_name)
+        elif error_msg == "__cancelled__":
+            if backend == self.backend_combo.currentData():
+                self.check_selected_model_status(model_name)
+                self.model_status_label.setText(translate("model.status.cancelled"))
         else:
             QMessageBox.critical(self, translate("model.dialog.download_error"), translate("model.dialog.error_detail", detail=error_msg))
             if backend == self.backend_combo.currentData():

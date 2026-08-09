@@ -18,6 +18,7 @@ from src.engine.file_transcriber import FileTranscribeWorker, segments_to_json, 
 from src.engine.model_manager import ModelManager, supported_models
 from src.engine.stt_cloud import CloudSTTEngine
 from src.engine.stt_cuda import CUDASTTEngine
+from src.engine.stt_cpu import CPUSTTEngine
 from src.engine.stt_vulkan import VulkanSTTEngine
 from src.engine.provider_catalog import ProviderCatalog
 from src.engine.provider_transport import ProviderRequestCancelled, run_cancellable
@@ -369,6 +370,26 @@ class ElevationTests(unittest.TestCase):
         self.assertEqual(execute.call_args.args[1], "runas")
         self.assertIn("--start-hidden", execute.call_args.args[3])
         self.assertIn(ELEVATED_RELAUNCH_ARG, execute.call_args.args[3])
+
+
+class StartupTests(unittest.TestCase):
+    def test_elevated_startup_uses_scheduler_instead_of_run_key(self):
+        from src import startup
+        with patch.object(startup, "_set_registry_startup") as registry, \
+             patch.object(startup, "_configure_elevated_task") as task:
+            startup.configure_start_with_windows(True, elevated=True)
+
+        registry.assert_called_once_with(False)
+        task.assert_called_once_with(True, start_with_windows=True)
+
+    def test_admin_mode_without_autostart_still_registers_on_demand_task(self):
+        from src import startup
+        with patch.object(startup, "_set_registry_startup") as registry, \
+             patch.object(startup, "_configure_elevated_task") as task:
+            startup.configure_start_with_windows(False, elevated=True)
+
+        registry.assert_called_once_with(False)
+        task.assert_called_once_with(True, start_with_windows=False)
 
 
 class AdaptiveVADTests(unittest.TestCase):
@@ -732,6 +753,49 @@ class VulkanSTTTests(unittest.TestCase):
 
 
 class EngineFallbackTests(unittest.TestCase):
+    def test_cpu_engine_exposes_ram_residency_and_unload(self):
+        engine = CPUSTTEngine()
+        engine.model = object()
+        engine.model_name = "base"
+
+        self.assertTrue(engine.is_model_resident())
+        engine.unload_model()
+        self.assertFalse(engine.is_model_resident())
+        self.assertIsNone(engine.model_name)
+
+    def test_switching_to_cpu_warms_selected_model_immediately(self):
+        manager = EngineManager()
+        values = {"stt_backend": "cpu", "model_size": "small"}
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch.object(manager, "start_warmup") as warmup:
+            manager.apply_stt_configuration("vulkan", "base")
+
+        warmup.assert_called_once_with()
+
+    def test_switching_from_cpu_to_cuda_releases_ram_and_warms_gpu(self):
+        manager = EngineManager()
+        cpu_engine = Mock(model_name="base")
+        manager.engines = {"cpu": cpu_engine}
+        values = {"stt_backend": "cuda", "model_size": "small"}
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch.object(manager, "start_warmup") as warmup:
+            manager.apply_stt_configuration("cpu", "base")
+
+        cpu_engine.unload_model.assert_called_once_with()
+        warmup.assert_called_once_with()
+
+    def test_changing_cpu_model_releases_old_model_and_warms_new_one(self):
+        manager = EngineManager()
+        cpu_engine = Mock(model_name="base")
+        manager.engines = {"cpu": cpu_engine}
+        values = {"stt_backend": "cpu", "model_size": "medium"}
+        with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch.object(manager, "start_warmup") as warmup:
+            manager.apply_stt_configuration("cpu", "base")
+
+        cpu_engine.unload_model.assert_called_once_with()
+        warmup.assert_called_once_with()
+
     def test_switching_to_cpu_releases_resident_gpu_models(self):
         manager = EngineManager()
         cuda_engine = Mock(model_name="base")
@@ -766,12 +830,14 @@ class EngineFallbackTests(unittest.TestCase):
 
         values = {"stt_backend": "cpu", "model_size": "base"}
         with patch("src.engine.engine_manager.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
-             patch("src.engine.engine_manager.threading.Thread") as thread:
+             patch("src.engine.engine_manager.threading.Thread") as thread, \
+             patch.object(manager, "start_warmup") as warmup:
             thread.return_value.start.side_effect = lambda: thread.call_args.kwargs["target"]()
             manager.apply_stt_configuration("vulkan", "base")
 
         active_warmup.join.assert_called_once_with()
         self.assertEqual(gpu_engine.unload_model.call_count, 1)
+        warmup.assert_called_once_with()
 
     def test_text_processing_failure_never_reuploads_audio_as_stt_fallback(self):
         manager = EngineManager()
@@ -1040,6 +1106,14 @@ class FileDecodeTests(unittest.TestCase):
 
 
 class ModelStorageTests(unittest.TestCase):
+    def test_active_model_download_can_be_cancelled_cooperatively(self):
+        manager = ModelManager()
+        manager._is_downloading = True
+
+        self.assertTrue(manager.cancel_download())
+        self.assertTrue(manager._download_cancel.is_set())
+        self.assertFalse(ModelManager().cancel_download())
+
     def test_backend_model_catalogs_are_independent(self):
         self.assertIn("large-v3", supported_models("cpu"))
         self.assertIn("large-v3", supported_models("cuda"))

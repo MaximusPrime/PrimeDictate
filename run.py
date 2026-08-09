@@ -21,7 +21,11 @@ from src.ui.main_window import MainWindow
 from src.ui.floating_overlay import FloatingOverlay
 from src.ui.tray_icon import SystemTrayManager
 from src.logging_config import configure_logging
-from src.startup import configure_start_with_windows
+from src.startup import (
+    configure_start_with_windows,
+    consume_show_window_request,
+    launch_elevated_task,
+)
 from src.elevation import relaunch_as_administrator, should_attempt_configured_elevation
 
 # Configure bounded, redacted file and console logging before app startup.
@@ -92,9 +96,12 @@ class PrimeDictateApp(QObject):
 
         # Refresh older Run entries so existing users also receive the
         # --start-hidden startup behavior after upgrading.
-        if config_manager.get("start_with_windows", False):
+        if config_manager.get("start_with_windows", False) or config_manager.get("run_as_administrator", False):
             try:
-                configure_start_with_windows(True)
+                configure_start_with_windows(
+                    True,
+                    elevated=config_manager.get("run_as_administrator", False),
+                )
             except OSError:
                 logger.warning("Could not refresh the Windows startup entry.", exc_info=True)
 
@@ -107,6 +114,8 @@ class PrimeDictateApp(QObject):
         self._connect_signals()
         self.reload_settings()
         self.engine_manager.start_warmup()
+        self._warmup_was_active = self.engine_manager.is_warmup_active()
+        self._show_model_warmup_status()
         QTimer.singleShot(250, self._poll_model_warmup)
 
     def _connect_signals(self):
@@ -155,14 +164,37 @@ class PrimeDictateApp(QObject):
         )
 
     def _poll_model_warmup(self):
+        active = self.engine_manager.is_warmup_active()
         self._sync_tray_model_memory()
-        if self.engine_manager.is_warmup_active() and not self._shutdown_requested.is_set():
+        if active:
+            self._warmup_was_active = True
+        elif getattr(self, "_warmup_was_active", False):
+            self._warmup_was_active = False
+            if self.state == AppState.IDLE:
+                self.main_window.set_app_state(AppState.IDLE.value, translate("status.ready"))
+                if config_manager.get("overlay_enabled", True) and config_manager.get("overlay_always_on", False):
+                    self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3")
+        if active and not self._shutdown_requested.is_set():
             QTimer.singleShot(500, self._poll_model_warmup)
+
+    def track_model_warmup(self):
+        """Expose newly-started settings warmup immediately and track completion."""
+        self._warmup_was_active = self.engine_manager.is_warmup_active()
+        self._show_model_warmup_status()
+        QTimer.singleShot(100, self._poll_model_warmup)
+
+    def _show_model_warmup_status(self):
+        if not self.engine_manager.is_warmup_active() or self.state != AppState.IDLE:
+            return
+        self.main_window.set_app_state(AppState.IDLE.value, translate("status.preparing_model"))
+        if config_manager.get("overlay_enabled", True) and config_manager.get("overlay_always_on", False):
+            self.overlay.set_status(translate("overlay.status.preparing_model"), "#f59e0b")
+            self.overlay.show()
 
     def toggle_model_memory(self):
         backend = config_manager.get("stt_backend", "cpu")
         if (
-            backend not in {"cuda", "vulkan"}
+            backend not in {"cpu", "cuda", "vulkan"}
             or self.state != AppState.IDLE
             or self._model_memory_busy
             or self.engine_manager.is_warmup_active()
@@ -190,7 +222,11 @@ class PrimeDictateApp(QObject):
         self._model_memory_busy = False
         self._sync_tray_model_memory()
         if success:
-            key = "tray.notice.model_loaded" if loading else "tray.notice.vram_released"
+            backend = config_manager.get("stt_backend", "cpu")
+            if loading:
+                key = "tray.notice.model_loaded_ram" if backend == "cpu" else "tray.notice.model_loaded"
+            else:
+                key = "tray.notice.ram_released" if backend == "cpu" else "tray.notice.vram_released"
             self.tray.show_message("PrimeDictate", translate(key))
         else:
             self.tray.show_message("PrimeDictate", translate("tray.notice.model_memory_error", detail=detail))
@@ -257,10 +293,13 @@ class PrimeDictateApp(QObject):
             threading.Thread(target=lambda: winsound.Beep(800, 150), daemon=True).start()
 
         self._dictation_stopped_at = time.perf_counter()
-        self._set_state(AppState.TRANSCRIBING, translate("status.transcribing"))
+        warmup_active = self.engine_manager.is_warmup_active()
+        status_text = translate("status.preparing_model") if warmup_active else translate("status.transcribing")
+        overlay_text = translate("overlay.status.preparing_model") if warmup_active else translate("overlay.status.transcribing")
+        self._set_state(AppState.TRANSCRIBING, status_text)
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_processing_active(True)
-            self.overlay.set_status(translate("overlay.status.transcribing"), "#f59e0b")
+            self.overlay.set_status(overlay_text, "#f59e0b")
 
         # Stream finalization, concatenation and resampling can be expensive.
         self._processing_thread = threading.Thread(
@@ -402,7 +441,12 @@ class PrimeDictateApp(QObject):
         self.hotkey_listener.sync_recording_state(False)
 
     def run(self):
-        start_hidden = "--start-hidden" in sys.argv and config_manager.get("setup_completed", False)
+        show_requested = consume_show_window_request()
+        start_hidden = (
+            "--start-hidden" in sys.argv
+            and not show_requested
+            and config_manager.get("setup_completed", False)
+        )
         if not start_hidden:
             self.main_window.show()
         sys.exit(self.app.exec())
@@ -435,6 +479,8 @@ class PrimeDictateApp(QObject):
 if __name__ == "__main__":
     if should_attempt_configured_elevation(config_manager):
         try:
+            if launch_elevated_task(show_window="--start-hidden" not in sys.argv):
+                raise SystemExit(0)
             if relaunch_as_administrator():
                 raise SystemExit(0)
         except OSError:

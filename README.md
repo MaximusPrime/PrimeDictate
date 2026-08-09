@@ -87,7 +87,7 @@ CPU and GPU can be changed later in **Speech to Text**; the first-run choice is 
 
 PrimeDictate warms the selected local engine in the background after startup. The bundled Vulkan path keeps the selected GGML model in a loopback-only `whisper-server` process, avoiding repeated process and model-loading cost during consecutive dictation. If the persistent server cannot start or answer, PrimeDictate automatically falls back to its verified one-shot CLI path. CPU may still win on some systems, and CUDA is typically preferred on a supported NVIDIA GPU; measure on the target hardware because model size, driver, CPU, GPU, and recording length all matter.
 
-When using CUDA or Vulkan, the system tray provides a state-aware **Game Mode — Release VRAM** action. It safely unloads the idle dictation model so games can use the GPU memory; the same action changes to **Load Dictation Model** when memory has been released. The control is disabled during recording, transcription, model loading, and startup warmup, and is hidden for CPU and cloud engines.
+For CUDA or Vulkan, the system tray provides a state-aware **Game Mode — Release VRAM** action. CPU provides the equivalent **Release RAM** action for memory-constrained systems. PrimeDictate keeps the selected local model resident by default for minimum dictation latency; after an explicit release, the same action changes to **Load Dictation Model**. Memory controls are disabled during recording, transcription, model loading, and startup warmup, and are hidden only for cloud engines.
 
 The floating control shows **Transcribing** while a result is pending. As soon as the result is available, dictation returns to idle immediately and the Play control becomes available; no artificial success cooldown is imposed. Diagnostic logs include `Dictation stop-to-result latency=...` for end-to-end measurement.
 
@@ -124,7 +124,7 @@ Clipboard insertion remembers one foreground target window and its owning proces
 
 ### Administrator mode
 
-Installed and portable builds both run with standard user rights by default. Enable **Run PrimeDictate as administrator** in Settings only when dictating into elevated applications. On the next launch, PrimeDictate relaunches itself through the official Windows `runas` UAC flow. Disabling the option returns subsequent launches to standard rights. The installer may request elevation to write under Program Files, but it does not force the installed application to remain elevated; the portable executable uses the same opt-in runtime behavior. Combining administrator mode with **Start with Windows** causes a UAC prompt at every sign-in, so standard mode is recommended unless elevated targets are part of the daily workflow.
+Installed and portable builds both run with standard user rights by default. Enable **Run PrimeDictate as administrator** in Settings only when dictating into elevated applications. PrimeDictate then registers a highest-privilege Task Scheduler entry: Windows asks for UAC once while the setting is saved, and later manual launches run that pre-authorized task without another prompt. Combining it with **Start with Windows** adds an at-logon trigger and keeps the launch hidden. Disabling administrator mode returns subsequent launches to standard rights and removes the task. The installer may still request elevation to write under Program Files, but it does not force the installed application to remain elevated.
 
 ## File Transcription
 

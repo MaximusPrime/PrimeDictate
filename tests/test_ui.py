@@ -26,6 +26,22 @@ from src.injector.paste_injector import PasteInjector
 
 
 class UIStructureTests(unittest.TestCase):
+    def test_model_progress_and_cancel_completion_remain_non_blocking(self):
+        window = MainWindowModelsMixin()
+        window.model_progress = Mock()
+        window.model_status_label = Mock()
+        window.backend_combo = Mock()
+        window.backend_combo.currentData.return_value = "cpu"
+        window.check_selected_model_status = Mock()
+
+        window._on_model_progress(25, "İndiriliyor")
+        with patch("src.ui.main_window_models.QMessageBox.critical") as critical:
+            window._on_model_download_finished("cpu", "base", False, "__cancelled__")
+
+        window.model_progress.setValue.assert_called_with(25)
+        window.check_selected_model_status.assert_called_once_with("base")
+        critical.assert_not_called()
+
     def test_main_window_responsibilities_are_split_into_components(self):
         self.assertTrue(issubclass(MainWindow, MainWindowPagesMixin))
         self.assertTrue(issubclass(MainWindow, MainWindowSettingsMixin))
@@ -270,7 +286,10 @@ class UIStructureTests(unittest.TestCase):
         tray.set_dictation_state("transcribing")
         self.assertFalse(tray.model_memory_action.isEnabled())
         tray.set_model_memory_state("cpu", resident=False)
-        self.assertFalse(tray.model_memory_action.isVisible())
+        self.assertTrue(tray.model_memory_action.isVisible())
+        self.assertEqual(tray.model_memory_action.text(), "Dikte Modelini Yükle")
+        tray.set_model_memory_state("cpu", resident=True)
+        self.assertEqual(tray.model_memory_action.text(), "RAM'i Boşalt")
         tray.set_dictation_state("idle", enabled=False)
         self.assertEqual(tray.toggle_action.text(), "Dikteyi Başlat")
         self.assertFalse(tray.toggle_action.isEnabled())
@@ -493,11 +512,26 @@ class UIStructureTests(unittest.TestCase):
         self.assertFalse(overlay.status_label.wordWrap())
         self.assertEqual(overlay.status_label.text(), "Panoya Kopyalandı")
         self.assertEqual(overlay.status_label.toolTip(), "Metin panoya kopyalandı")
+        self.assertLessEqual(overlay.status_label.width(), overlay.STATUS_MAX_WIDTH)
         self.assertNotIn("#10b981", overlay.status_label.styleSheet())
         self.assertIn("rgba(196, 167, 110, 210)", overlay.status_label.styleSheet())
         self.assertLess(overlay.status_label.geometry().bottom(), overlay.container.geometry().top())
         self.assertEqual(overlay.container.width(), overlay.CONTROL_IDLE_WIDTH)
         self.assertEqual(overlay.width(), 218)
+        overlay.close()
+
+    def test_overlay_status_width_is_fixed_for_every_message(self):
+        overlay = FloatingOverlay()
+        overlay.set_status("Hazır")
+        short_width = overlay.status_label.width()
+        overlay.set_status("Model hazırlanıyor…")
+        long_width = overlay.status_label.width()
+        overlay.set_status("x" * 500)
+
+        self.assertGreaterEqual(short_width, overlay.STATUS_MIN_WIDTH)
+        self.assertLessEqual(short_width, overlay.STATUS_MAX_WIDTH)
+        self.assertEqual(long_width, short_width)
+        self.assertEqual(overlay.status_label.width(), short_width)
         overlay.close()
 
     def test_app_logo_uses_independently_bundled_fallback(self):

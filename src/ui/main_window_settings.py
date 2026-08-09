@@ -344,12 +344,16 @@ class MainWindowSettingsMixin:
             "custom_user_rules": self.custom_rules_edit.toPlainText().strip(),
         }
         previous_startup = config_manager.get("start_with_windows", False)
+        previous_admin_mode = config_manager.get("run_as_administrator", False)
         try:
-            configure_start_with_windows(self.start_windows_cb.isChecked())
+            configure_start_with_windows(
+                self.start_windows_cb.isChecked(),
+                elevated=self.admin_mode_cb.isChecked(),
+            )
             config_manager.update(settings)
         except (RuntimeError, OSError) as exc:
             try:
-                configure_start_with_windows(previous_startup)
+                configure_start_with_windows(previous_startup, elevated=previous_admin_mode)
             except OSError:
                 pass
             QMessageBox.critical(self, translate("settings.dialog.save_failed"), str(exc))
@@ -360,6 +364,8 @@ class MainWindowSettingsMixin:
         if self.app_controller:
             self.app_controller.reload_settings()
         self.engine_manager.apply_stt_configuration(previous_backend, previous_model)
+        if self.app_controller and hasattr(self.app_controller, "track_model_warmup"):
+            self.app_controller.track_model_warmup()
 
         self._apply_ui_language()
         self._refresh_dashboard()
@@ -382,5 +388,5 @@ class MainWindowSettingsMixin:
             key = "settings.admin_status.standard"
         detail = translate(key)
         if self.admin_mode_cb.isChecked() and self.start_windows_cb.isChecked():
-            detail += " " + translate("settings.admin_status.startup_uac")
+            detail += " " + translate("settings.admin_status.startup_scheduled")
         self.admin_mode_status.setText(detail)

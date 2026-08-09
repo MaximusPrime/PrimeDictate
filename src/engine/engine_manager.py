@@ -96,7 +96,7 @@ class EngineManager:
             return
 
         with self._engine_lock:
-            for engine_backend in ("cuda", "vulkan"):
+            for engine_backend in ("cpu", "cuda", "vulkan"):
                 engine = self.engines.get(engine_backend)
                 if engine is None:
                     continue
@@ -107,7 +107,7 @@ class EngineManager:
                     if callable(unload):
                         unload()
 
-        if backend in {"cuda", "vulkan"} and (
+        if backend in {"cpu", "cuda", "vulkan"} and (
             backend != previous_backend or model != previous_model
         ):
             self.start_warmup()
@@ -115,7 +115,7 @@ class EngineManager:
     def load_selected_model(self, backend: str = None):
         with self._engine_lock:
             backend = backend or config_manager.get("stt_backend", "cpu")
-            if backend not in {"cuda", "vulkan"}:
+            if backend not in {"cpu", "cuda", "vulkan"}:
                 return
             engine = self.get_engine(backend)
             engine.load_model(
