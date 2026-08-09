@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -165,6 +166,11 @@ class OverlaySurface(QWidget):
 
 
 class FloatingOverlay(QWidget):
+    OVERLAY_WIDTH = 218
+    OVERLAY_HEIGHT = 75
+    CONTROL_IDLE_WIDTH = 104
+    CONTROL_RECORDING_WIDTH = 166
+
     def __init__(self, start_callback=None, stop_callback=None):
         super().__init__()
         self.start_callback = start_callback
@@ -176,7 +182,7 @@ class FloatingOverlay(QWidget):
             | Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(218, 46)
+        self.setFixedSize(self.OVERLAY_WIDTH, self.OVERLAY_HEIGHT)
         self.drag_position = QPoint()
         self._has_saved_position = False
         self._recording_active = False
@@ -187,11 +193,31 @@ class FloatingOverlay(QWidget):
         self.hide()
 
     def _setup_ui(self):
-        main_layout = QHBoxLayout(self)
+        main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(3, 3, 3, 3)
+        main_layout.setSpacing(2)
+
+        self.status_label = QLabel(translate("overlay.status.ready"))
+        self.status_label.setObjectName("overlayStatus")
+        self.status_label.setFixedSize(196, 27)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setWordWrap(False)
+        self.status_label.setStyleSheet("""
+            QLabel#overlayStatus {
+                color: #c8d0da;
+                background: rgba(13, 17, 23, 238);
+                border: 1px solid rgba(111, 166, 180, 150);
+                border-radius: 10px;
+                padding: 0 10px;
+                font-size: 9px;
+                font-weight: 600;
+            }
+        """)
+        self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         self.container = OverlaySurface(self)
         self.container.setObjectName("overlaySurface")
+        self.container.setFixedSize(self.CONTROL_IDLE_WIDTH, 40)
         self.container.setStyleSheet("""
             QLabel#overlayLogo, QLabel#dragGrip {
                 background: transparent;
@@ -210,7 +236,7 @@ class FloatingOverlay(QWidget):
         self.container.setGraphicsEffect(shadow)
 
         container_layout = QHBoxLayout(self.container)
-        container_layout.setContentsMargins(8, 3, 8, 3)
+        container_layout.setContentsMargins(8, 3, 5, 3)
         container_layout.setSpacing(6)
 
         self.logo_label = QLabel()
@@ -228,13 +254,6 @@ class FloatingOverlay(QWidget):
         self.visualizer.setFixedSize(60, 20)
         self.visualizer.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        self.status_label = QLabel(translate("overlay.status.ready"))
-        self.status_label.setFixedSize(92, 34)
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color:#c8d0da; font-size:9px; font-weight:600;")
-        self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-
         self.play_button = OverlayPlayButton()
         self.play_button.setToolTip(translate("overlay.start_dictation"))
         self.play_button.clicked.connect(self._request_start)
@@ -250,11 +269,11 @@ class FloatingOverlay(QWidget):
 
         container_layout.addWidget(self.logo_label)
         container_layout.addWidget(self.visualizer)
-        container_layout.addWidget(self.status_label)
         container_layout.addWidget(self.play_button)
         container_layout.addWidget(self.stop_button)
         container_layout.addWidget(self.drag_grip)
-        main_layout.addWidget(self.container)
+        main_layout.addWidget(self.status_label, 0, Qt.AlignHCenter)
+        main_layout.addWidget(self.container, 0, Qt.AlignHCenter)
 
     def _target_screen(self, point: QPoint = None):
         app = QApplication.instance()
@@ -300,7 +319,17 @@ class FloatingOverlay(QWidget):
     def set_status(self, text: str, color_hex: str = "#edf0f3", tooltip_text: str = None):
         self.status_label.setText(text)
         self.status_label.setStyleSheet(
-            f"color:{color_hex}; font-size:9px; font-weight:600;"
+            f"""
+            QLabel#overlayStatus {{
+                color: {color_hex};
+                background: rgba(13, 17, 23, 238);
+                border: 1px solid {color_hex};
+                border-radius: 10px;
+                padding: 0 10px;
+                font-size: 9px;
+                font-weight: 600;
+            }}
+            """
         )
         self.status_label.setToolTip(tooltip_text or text)
 
@@ -308,8 +337,10 @@ class FloatingOverlay(QWidget):
         self._recording_active = active
         if active:
             self._processing_active = False
+        self.container.setFixedWidth(
+            self.CONTROL_RECORDING_WIDTH if active else self.CONTROL_IDLE_WIDTH
+        )
         self.visualizer.setVisible(active)
-        self.status_label.setVisible(not active)
         self.stop_button.setVisible(active)
         self.stop_button.setEnabled(active)
         self.play_button.setVisible(not active)
@@ -319,8 +350,10 @@ class FloatingOverlay(QWidget):
         self._processing_active = active
         if active:
             self._recording_active = False
+        self.container.setFixedWidth(
+            self.CONTROL_RECORDING_WIDTH if self._recording_active else self.CONTROL_IDLE_WIDTH
+        )
         self.visualizer.setVisible(self._recording_active)
-        self.status_label.setVisible(not self._recording_active)
         self.stop_button.setVisible(self._recording_active)
         self.play_button.setVisible(not self._recording_active)
         self.play_button.setEnabled(not active and not self._recording_active)

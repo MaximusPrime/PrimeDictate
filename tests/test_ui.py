@@ -398,7 +398,7 @@ class UIStructureTests(unittest.TestCase):
         screen_geometry = overlay._target_screen(QPoint(0, 0)).availableGeometry()
         self.assertTrue(screen_geometry.adjusted(0, 0, -overlay.width(), -overlay.height()).contains(overlay.pos()))
         self.assertEqual(overlay.size().width(), 218)
-        self.assertEqual(overlay.size().height(), 46)
+        self.assertEqual(overlay.size().height(), 75)
         overlay.close()
 
     def test_overlay_stop_button_uses_controller_callback(self):
@@ -447,19 +447,37 @@ class UIStructureTests(unittest.TestCase):
 
         self.assertFalse(overlay.status_label.isHidden())
         self.assertEqual(overlay.status_label.text(), "Metne çevriliyor")
+        self.assertEqual(overlay.container.width(), overlay.CONTROL_IDLE_WIDTH)
         self.assertFalse(overlay.play_button.isEnabled())
         overlay.play_button.click()
         callback.assert_not_called()
         overlay.close()
 
-    def test_overlay_long_status_wraps_and_keeps_detailed_tooltip(self):
+    def test_overlay_status_sits_above_control_and_keeps_detailed_tooltip(self):
         overlay = FloatingOverlay()
         overlay.set_status("Panoya Kopyalandı", "#10b981", tooltip_text="Metin panoya kopyalandı")
+        overlay.show()
+        QApplication.processEvents()
 
-        self.assertTrue(overlay.status_label.wordWrap())
+        self.assertFalse(overlay.status_label.wordWrap())
         self.assertEqual(overlay.status_label.text(), "Panoya Kopyalandı")
         self.assertEqual(overlay.status_label.toolTip(), "Metin panoya kopyalandı")
+        self.assertLess(overlay.status_label.geometry().bottom(), overlay.container.geometry().top())
+        self.assertEqual(overlay.container.width(), overlay.CONTROL_IDLE_WIDTH)
         self.assertEqual(overlay.width(), 218)
+        overlay.close()
+
+    def test_overlay_recording_control_uses_compact_width_and_keeps_status_visible(self):
+        overlay = FloatingOverlay()
+        overlay.set_status("Dinleniyor", "#38bdf8")
+
+        overlay.set_recording_active(True)
+        overlay.show()
+        QApplication.processEvents()
+
+        self.assertFalse(overlay.status_label.isHidden())
+        self.assertEqual(overlay.container.width(), overlay.CONTROL_RECORDING_WIDTH)
+        self.assertLess(overlay.drag_grip.geometry().right(), overlay.container.width())
         overlay.close()
 
     def test_studio_logo_is_declared_in_all_build_paths(self):
