@@ -14,6 +14,18 @@ class TextProcessingError(RuntimeError):
     pass
 
 
+def _post_cancellable(url, *, cancel_check=None, **kwargs):
+    session = requests.Session()
+    try:
+        return run_cancellable(
+            lambda: session.post(url, **kwargs),
+            cancel_check,
+            on_cancel=session.close,
+        )
+    finally:
+        session.close()
+
+
 def _log_provider_failure(provider: str, error: Exception):
     status_code = getattr(error, "status_code", None)
     details = [f"error_type={type(error).__name__}"]
@@ -148,7 +160,13 @@ class AICleanupEngine:
                 ],
                 "temperature": 0.1
             }
-            resp = run_cancellable(lambda: requests.post(url, headers=headers, json=body, timeout=(5, 45)), cancel_check)
+            resp = _post_cancellable(
+                url,
+                headers=headers,
+                json=body,
+                timeout=(5, 45),
+                cancel_check=cancel_check,
+            )
             if resp.status_code == 200:
                 result = resp.json()['choices'][0]['message']['content'].strip()
                 if result.startswith('"') and result.endswith('"'):
@@ -178,7 +196,13 @@ class AICleanupEngine:
                     "parts": [{"text": f"{prompt}\n\nGirdi Metni:\n{text}"}]
                 }]
             }
-            resp = run_cancellable(lambda: requests.post(url, headers=headers, json=payload, timeout=(5, 45)), cancel_check)
+            resp = _post_cancellable(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=(5, 45),
+                cancel_check=cancel_check,
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 result = data['candidates'][0]['content']['parts'][0]['text'].strip()

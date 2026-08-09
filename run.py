@@ -22,6 +22,7 @@ from src.ui.floating_overlay import FloatingOverlay
 from src.ui.tray_icon import SystemTrayManager
 from src.logging_config import configure_logging
 from src.startup import configure_start_with_windows
+from src.elevation import relaunch_as_administrator, should_attempt_configured_elevation
 
 # Configure bounded, redacted file and console logging before app startup.
 LOG_PATH = configure_logging(APP_DIR)
@@ -209,6 +210,9 @@ class PrimeDictateApp(QObject):
     @Slot()
     def _on_recording_started(self):
         if self.state != AppState.IDLE:
+            return
+        if self._model_memory_busy:
+            self._set_state(AppState.IDLE, translate("status.processing"))
             return
         if not config_manager.get("setup_completed", False):
             self.main_window.show_and_raise()
@@ -429,5 +433,11 @@ class PrimeDictateApp(QObject):
         self.app.quit()
 
 if __name__ == "__main__":
+    if should_attempt_configured_elevation(config_manager):
+        try:
+            if relaunch_as_administrator():
+                raise SystemExit(0)
+        except OSError:
+            logger.exception("The configured administrator relaunch was declined or failed.")
     app = PrimeDictateApp()
     app.run()

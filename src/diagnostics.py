@@ -8,6 +8,7 @@ import zipfile
 
 from src import __version__
 from src.logging_config import SensitiveDataFilter
+from src.elevation import is_running_as_administrator
 
 
 SAFE_CONFIG_KEYS = (
@@ -20,6 +21,7 @@ SAFE_CONFIG_KEYS = (
     "ai_cleanup_provider",
     "allow_cloud_fallback",
     "max_recording_seconds",
+    "run_as_administrator",
 )
 
 
@@ -31,6 +33,7 @@ def create_diagnostics_bundle(destination, config, capabilities=None, log_dir=No
             "python": platform.python_version(),
             "architecture": platform.machine(),
             "frozen": bool(getattr(sys, "frozen", False)),
+            "elevated": is_running_as_administrator(),
         },
         "configuration": {key: config.get(key, None) for key in SAFE_CONFIG_KEYS},
         "backends": {},

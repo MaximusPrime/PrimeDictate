@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from scipy.signal import resample_poly
 
 
 class TranscriptionCancelled(Exception):
@@ -19,6 +18,7 @@ class BaseSTTEngine(ABC):
             return prepared
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
+        from scipy.signal import resample_poly
         divisor = int(np.gcd(sample_rate, 16000))
         return resample_poly(prepared, 16000 // divisor, sample_rate // divisor).astype(np.float32)
 

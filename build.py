@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 import subprocess
@@ -22,6 +23,8 @@ REQUIRED_BUILD_PATHS = (
     "PrimeDictate.spec",
     "PrimeDictate-Portable.spec",
     "installer.iss",
+    "requirements.txt",
+    "requirements-lock.txt",
     os.path.join("assets", "PrimeDictate-AppIcon.png"),
     os.path.join("assets", "maximus-prime-software.png"),
     os.path.join("src", "locales", "tr.json"),
@@ -84,6 +87,27 @@ def write_version_file(path, executable_name):
         version_file.write(contents)
 
 
+def write_release_checksums(project_root):
+    dist_dir = os.path.join(project_root, "dist")
+    artifacts = (
+        os.path.join(dist_dir, f"{APP_NAME}-Portable.exe"),
+        os.path.join(dist_dir, f"{APP_NAME}-Setup.exe"),
+        os.path.join(dist_dir, APP_NAME, f"{APP_NAME}.exe"),
+    )
+    lines = []
+    for artifact in artifacts:
+        if not os.path.isfile(artifact):
+            continue
+        digest = hashlib.sha256()
+        with open(artifact, "rb") as executable:
+            for chunk in iter(lambda: executable.read(1024 * 1024), b""):
+                digest.update(chunk)
+        relative = os.path.relpath(artifact, dist_dir).replace("\\", "/")
+        lines.append(f"{digest.hexdigest().upper()}  {relative}")
+    with open(os.path.join(dist_dir, "SHA256SUMS.txt"), "w", encoding="ascii", newline="\n") as checksum_file:
+        checksum_file.write("\n".join(lines) + "\n")
+
+
 def build():
     print("==========================================")
     print(f" Building {APP_NAME} {VERSION} Executables ")
@@ -129,7 +153,10 @@ def build():
     iscc_path = next((path for path in iscc_candidates if path and os.path.exists(path)), None)
     iss_file = os.path.join(project_root, "installer.iss")
     if iscc_path and os.path.exists(iss_file):
-        res3 = subprocess.run([iscc_path, f"/O{os.path.join(project_root, 'dist')}", iss_file], cwd=project_root)
+        res3 = subprocess.run(
+            [iscc_path, f"/DMyAppVersion={VERSION}", f"/O{os.path.join(project_root, 'dist')}", iss_file],
+            cwd=project_root,
+        )
         if res3.returncode == 0:
             print("✓ Windows Installer wizard created successfully in 'dist/PrimeDictate-Setup.exe'")
         else:
@@ -138,8 +165,10 @@ def build():
         res3 = None
         print("Inno Setup ISCC compiler not found, skipping setup.exe creation.")
 
-    if res1.returncode != 0 or res2.returncode != 0:
+    if res1.returncode != 0 or res2.returncode != 0 or (res3 is not None and res3.returncode != 0):
         raise SystemExit(1)
+
+    write_release_checksums(project_root)
 
     print("\n==========================================")
     print(" Build process finished! Outputs in /dist ")

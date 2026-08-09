@@ -40,6 +40,8 @@ exe = EXE(
     entitlements_file=None,
     version=version_file,
     icon=['PrimeDictate-Logo.ico'],
+    uac_admin=False,
+    uac_uiaccess=False,
 )
 coll = COLLECT(
     exe,

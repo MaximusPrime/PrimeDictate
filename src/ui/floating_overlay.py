@@ -1,5 +1,4 @@
 import math
-import os
 
 from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen
@@ -13,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.config import config_manager, get_resource_path
+from src.config import config_manager
 from src.i18n import translate
 from src.ui.brand import app_mark_pixmap
 
@@ -244,9 +243,9 @@ class FloatingOverlay(QWidget):
         self.logo_label.setFixedSize(26, 26)
         self.logo_label.setAlignment(Qt.AlignCenter)
         self.logo_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        logo_path = get_resource_path(os.path.join("assets", "PrimeDictate-AppIcon.png"))
-        if os.path.exists(logo_path):
-            self.logo_label.setPixmap(app_mark_pixmap(24))
+        logo = app_mark_pixmap(24)
+        if not logo.isNull():
+            self.logo_label.setPixmap(logo)
         else:
             self.logo_label.setText("PD")
 
@@ -319,16 +318,16 @@ class FloatingOverlay(QWidget):
     def set_status(self, text: str, color_hex: str = "#edf0f3", tooltip_text: str = None):
         self.status_label.setText(text)
         self.status_label.setStyleSheet(
-            f"""
-            QLabel#overlayStatus {{
-                color: {color_hex};
+            """
+            QLabel#overlayStatus {
+                color: #e8dfca;
                 background: rgba(13, 17, 23, 238);
-                border: 1px solid {color_hex};
+                border: 1px solid rgba(196, 167, 110, 210);
                 border-radius: 10px;
                 padding: 0 10px;
                 font-size: 9px;
                 font-weight: 600;
-            }}
+            }
             """
         )
         self.status_label.setToolTip(tooltip_text or text)

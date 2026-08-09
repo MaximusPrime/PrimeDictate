@@ -2,7 +2,6 @@ import os
 import logging
 import string
 import json
-import av
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 from src.engine.engine_manager import engine_manager
@@ -70,9 +69,10 @@ class FileTranscribeWorker(QThread):
             self.progress.emit(5, translate("file.progress.preparing_media"))
             text_parts = []
             chunk_lengths = []
+            chunk_starts = []
             configured_language = config_manager.get("language", "tr")
             detected_language = None
-            for chunk, percent in self._iter_audio_chunks():
+            for chunk_index, (chunk, percent) in enumerate(self._iter_audio_chunks()):
                 if self.isInterruptionRequested():
                     self.cancelled.emit()
                     return
@@ -95,13 +95,14 @@ class FileTranscribeWorker(QThread):
                 if text:
                     text_parts.append(text)
                     chunk_lengths.append(len(chunk))
+                    chunk_starts.append(chunk_index * (self.CHUNK_SECONDS - self.OVERLAP_SECONDS))
 
             if self.isInterruptionRequested():
                 self.cancelled.emit()
                 return
 
             text = self._merge_text_parts(text_parts)
-            self.segments = self._build_segments(text_parts, chunk_lengths)
+            self.segments = self._build_segments(text_parts, chunk_lengths, chunk_starts)
             if not text:
                 raise RuntimeError(translate("file.error.no_speech"))
 
@@ -116,10 +117,13 @@ class FileTranscribeWorker(QThread):
         except TranscriptionCancelled:
             self.cancelled.emit()
         except Exception as e:
-            logger.error(f"Error transcribing file {self.file_path}: {e}")
+            logger.error("File transcription failed (%s).", type(e).__name__)
             self.error.emit(str(e))
 
     def _iter_audio_chunks(self):
+        # PyAV is only needed for explicit file transcription, not application
+        # startup or live dictation.
+        import av
         chunk_size = self.CHUNK_SECONDS * self.TARGET_SAMPLE_RATE
         overlap_size = self.OVERLAP_SECONDS * self.TARGET_SAMPLE_RATE
         step_size = chunk_size - overlap_size
@@ -204,7 +208,7 @@ class FileTranscribeWorker(QThread):
             merged_words.extend(words[overlap:])
         return " ".join(merged_words).strip()
 
-    def _build_segments(self, parts, chunk_lengths):
+    def _build_segments(self, parts, chunk_lengths, chunk_starts=None):
         segments = []
         merged_words = []
         step_seconds = self.CHUNK_SECONDS - self.OVERLAP_SECONDS
@@ -223,7 +227,7 @@ class FileTranscribeWorker(QThread):
             merged_words.extend(unique_words)
             if not unique_words:
                 continue
-            start = index * step_seconds
+            start = chunk_starts[index] if chunk_starts is not None else index * step_seconds
             end = start + sample_count / self.TARGET_SAMPLE_RATE
             segments.append({
                 "start": round(start, 3),

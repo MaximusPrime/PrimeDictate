@@ -327,6 +327,10 @@ Profil: Kodlama ve teknik terimler
 
 ## Sorun Giderme
 
+### Yönetici olarak çalışan uygulamalara yapıştırma
+
+PrimeDictate normalde standart kullanıcı yetkileriyle açılır. Yönetici olarak başlatılmış bir hedef uygulamaya Windows güvenlik sınırı nedeniyle tuş gönderilemezse **Ayarlar > PrimeDictate'i yönetici olarak çalıştır** seçeneğini etkinleştirin ve uygulamayı yeniden başlatın. Sonraki açılışta Windows UAC onayı ister. Ayar hem kurulu hem portable sürümde aynıdır; setup yalnız Program Files kurulumu için yönetici yetkisi ister ve uygulamayı kalıcı olarak yükseltilmiş çalışmaya zorlamaz. Yönetici modu ile Windows başlangıcı birlikte açıksa her oturum açılışında UAC onayı gerekir.
+
 ### Mikrofon başlamıyor
 
 1. Windows mikrofon gizlilik iznini kontrol edin.

@@ -152,6 +152,7 @@ DEFAULT_CONFIG = {
     "history_enabled": True,
     "play_sound": True,
     "start_with_windows": False,
+    "run_as_administrator": False,
     "overlay_enabled": True,
     "overlay_always_on": False,
     "ui_font_size": "normal",  # "small", "normal", "large"
@@ -366,6 +367,7 @@ class ConfigManager:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temp_path, HISTORY_PATH)
+            return True
         except Exception as e:
             logger.error(f"Error saving history: {e}")
             if temp_path and os.path.exists(temp_path):
@@ -373,5 +375,6 @@ class ConfigManager:
                     os.remove(temp_path)
                 except OSError:
                     pass
+            return False
 
 config_manager = ConfigManager()

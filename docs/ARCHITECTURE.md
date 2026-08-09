@@ -20,6 +20,12 @@ PrimeDictate is built around the following invariants:
 PrimeDictateApp
 |-- QApplication
 |-- MainWindow
+|   |-- MainWindowPagesMixin
+|   |-- MainWindowSettingsMixin
+|   |-- MainWindowModelsMixin
+|   |-- FileTranscriptionController
+|   |-- ProviderTestController
+|   `-- HistoryStore
 |-- FloatingOverlay
 |-- SystemTrayManager
 |-- HotkeyListener
@@ -57,7 +63,7 @@ The main action button and tray route through the controller toggle operation. T
 
 ```text
 1. User invokes the global hotkey.
-2. PasteInjector captures the current foreground HWND.
+2. PasteInjector captures the current foreground HWND and owning process ID.
 3. AudioRecorder opens the selected input device.
 4. Live levels are emitted to MainWindow and FloatingOverlay.
 5. Recording stops through toggle or key release.
@@ -66,7 +72,7 @@ The main action button and tray route through the controller toggle operation. T
 8. EngineManager dispatches to the selected STT backend.
 9. AICleanupEngine optionally processes the raw transcript.
 10. The final text returns to the Qt thread through a signal.
-11. PasteInjector restores the captured target and sends Ctrl+V only if focus validation succeeds.
+11. PasteInjector restores the captured target and sends Ctrl+V only if the HWND still belongs to the captured process and focus validation succeeds. Without a verified target, text remains on the clipboard.
 12. The controller releases the dictation operation and returns to `IDLE` immediately.
 13. The transcript may be added to local history; history/dashboard rendering cannot hold the state machine in `TRANSCRIBING`.
 ```
@@ -168,7 +174,7 @@ Preset prompts preserve the transcript language unless the selected profile expl
 
 ## File Transcription
 
-`FileTranscribeWorker` is a cooperatively cancellable `QThread`. Cancellation is propagated through `EngineManager` without triggering cloud fallback. CPU/CUDA check between decoded segments. Persistent Vulkan and cloud requests check cancellation before dispatch and after the blocking HTTP call returns; the one-shot Vulkan fallback can terminate its active CLI subprocess.
+`FileTranscriptionController` owns the lifecycle of the cooperatively cancellable `FileTranscribeWorker` QThread. Cancellation is propagated through `EngineManager` without triggering cloud fallback. CPU/CUDA check between decoded segments. Persistent Vulkan and cloud requests check cancellation before dispatch and actively close their request session/client when cancellation is requested; the one-shot Vulkan fallback can terminate its active CLI subprocess.
 
 PyAV decodes the selected media stream and resamples it to mono 16 kHz. Pending samples are emitted in bounded 30-second chunks. Progress is calculated from stream duration when available.
 
@@ -182,17 +188,17 @@ Each chunk currently passes through the same optional text-processing stage as l
 
 The insertion sequence is:
 
-1. Store the existing clipboard value when restoration is enabled.
+1. Snapshot all currently advertised Qt clipboard MIME formats when restoration is enabled.
 2. Copy the final transcript.
-3. Validate that the target HWND still exists.
+3. Validate that the target HWND still exists, still belongs to the captured process, and is not across an unsupported elevation boundary.
 4. Request foreground focus for the target.
 5. Verify that the foreground window matches the target.
 6. Send `Ctrl+V` only after successful verification.
-7. Restore the previous plain-text clipboard value after the configured delay.
+7. Restore the MIME snapshot only if the clipboard sequence still belongs to PrimeDictate; a newer user copy is never overwritten.
 
 If focus verification fails, the transcript remains on the clipboard and no keystroke is sent.
 
-Clipboard backup uses `pyperclip` and therefore preserves only plain text. Images, file lists, HTML, rich text, and other Windows clipboard formats are outside this restoration contract.
+Clipboard backup uses Qt MIME data and preserves text, HTML, images, file lists, and custom formats exposed by the current clipboard owner. Delayed-rendering formats that an external application does not expose remain outside this contract.
 
 ## Configuration and Secrets
 
@@ -222,6 +228,8 @@ The language catalog supports reverse lookup so an existing English widget tree 
 ## UI Information Architecture
 
 `MainWindow.PAGE_DEFINITIONS` is the canonical page registry. Navigation buttons, stacked pages, headers, and footer visibility are derived from this single ordered source.
+
+`MainWindow` is the shell and event coordinator. Page construction lives in `main_window_pages.py`, persisted settings synchronization in `main_window_settings.py`, hardware/model lifecycle in `main_window_models.py`, and reusable hotkey/combobox widgets in `main_window_widgets.py`. Provider discovery and file-transcription worker ownership use dedicated controller objects. This keeps UI concerns independently testable without changing the public `MainWindow` signal and method contract.
 
 Current pages:
 

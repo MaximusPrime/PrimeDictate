@@ -32,6 +32,13 @@ from src.audio.vad import is_audio_meaningful, trim_silence
 from src.logging_config import SensitiveDataFilter
 from src.diagnostics import create_diagnostics_bundle
 from src.hotkey.listener import HotkeyListener, canonicalize_hotkey
+from src.history import HistoryStore
+from src.elevation import (
+    ELEVATED_RELAUNCH_ARG,
+    is_running_as_administrator,
+    relaunch_as_administrator,
+    should_attempt_configured_elevation,
+)
 
 
 class HotkeyListenerTests(unittest.TestCase):
@@ -175,7 +182,9 @@ class CleanupTests(unittest.TestCase):
         engine = AICleanupEngine()
         error = RuntimeError("secret-key and private transcript")
         error.status_code = 429
-        with patch("src.engine.ai_cleanup.requests.post", side_effect=error), \
+        session = Mock()
+        session.post.side_effect = error
+        with patch("src.engine.ai_cleanup.requests.Session", return_value=session), \
              self.assertLogs("PrimeDictate.AICleanup", level="ERROR") as logs:
             result = engine._clean_with_openai_compatible(
                 "private transcript", "https://example.test/v1", "secret-key", "model", "prompt"
@@ -242,6 +251,30 @@ class OperationCoordinatorTests(unittest.TestCase):
         self.assertIsNone(coordinator.active_operation)
 
 
+class HistoryStoreTests(unittest.TestCase):
+    def test_mutations_use_cached_bounded_history(self):
+        persistence = Mock()
+        persistence.load_history.return_value = [{"time": "1", "text": "first"}]
+        store = HistoryStore(persistence=persistence, limit=2)
+
+        store.add({"time": "2", "text": "second"})
+        store.add({"time": "3", "text": "third"})
+
+        persistence.load_history.assert_called_once_with()
+        self.assertEqual([item["text"] for item in store.entries()], ["third", "second"])
+        self.assertEqual(persistence.save_history.call_args.args[0], store.entries())
+
+    def test_delete_and_clear_persist_changes(self):
+        persistence = Mock()
+        persistence.load_history.return_value = [{"time": "1", "text": "first"}]
+        store = HistoryStore(persistence=persistence)
+
+        self.assertTrue(store.delete("first", "1"))
+        self.assertEqual(store.entries(), [])
+        store.clear()
+        self.assertEqual(persistence.save_history.call_count, 2)
+
+
 class AudioRecorderLimitTests(unittest.TestCase):
     def test_recording_limit_caps_buffer_and_notifies_once(self):
         recorder = AudioRecorder()
@@ -282,6 +315,60 @@ class AudioRecorderLimitTests(unittest.TestCase):
         self.assertEqual(len(levels), 1)
         self.assertGreater(levels[0], 0.30)
         self.assertLess(levels[0], 0.45)
+
+    def test_live_recording_duration_is_bounded_to_ten_minutes(self):
+        recorder = AudioRecorder()
+        with patch.object(recorder, "_get_device_sample_rate", return_value=16000), \
+             patch("src.audio.recorder.sd.InputStream") as stream:
+            recorder.start_recording(max_duration_seconds=1800)
+
+        self.assertEqual(recorder.max_duration_seconds, 600)
+        stream.return_value.start.assert_called_once_with()
+        recorder.stop_recording()
+
+    def test_resampling_failure_does_not_return_mislabeled_audio(self):
+        recorder = AudioRecorder()
+        recorder.is_recording = True
+        recorder.native_sample_rate = 48000
+        recorder.frames = [np.ones((480, 1), dtype=np.float32)]
+
+        with patch("scipy.signal.resample_poly", side_effect=RuntimeError("failed")):
+            with self.assertRaisesRegex(RuntimeError, "resampling"):
+                recorder.stop_recording()
+
+    def test_live_callback_uses_disk_backed_spool_without_frame_growth(self):
+        recorder = AudioRecorder()
+        recorder.is_recording = True
+        recorder.native_sample_rate = 16000
+        recorder.max_samples = 100
+        recorder._audio_spool = tempfile.SpooledTemporaryFile(max_size=1, mode="w+b")
+
+        recorder._audio_callback(np.ones((10, 1), dtype=np.float32), 10, None, None)
+        result = recorder.stop_recording()
+
+        self.assertEqual(recorder.frames, [])
+        self.assertEqual(len(result), 10)
+
+
+class ElevationTests(unittest.TestCase):
+    def test_configured_elevation_is_attempted_only_once(self):
+        config = Mock()
+        config.get.return_value = True
+        with patch("src.elevation.is_running_as_administrator", return_value=False):
+            self.assertTrue(should_attempt_configured_elevation(config, ["app.exe"]))
+            self.assertFalse(should_attempt_configured_elevation(config, ["app.exe", ELEVATED_RELAUNCH_ARG]))
+
+    def test_frozen_relaunch_uses_windows_runas(self):
+        with patch("src.elevation.is_running_as_administrator", return_value=False), \
+             patch("src.elevation.sys.frozen", True, create=True), \
+             patch("src.elevation.sys.executable", r"C:\\Apps\\PrimeDictate-Portable.exe"), \
+             patch("src.elevation.ctypes.windll.shell32.ShellExecuteW", return_value=42) as execute:
+            launched = relaunch_as_administrator(["PrimeDictate-Portable.exe", "--start-hidden"])
+
+        self.assertTrue(launched)
+        self.assertEqual(execute.call_args.args[1], "runas")
+        self.assertIn("--start-hidden", execute.call_args.args[3])
+        self.assertIn(ELEVATED_RELAUNCH_ARG, execute.call_args.args[3])
 
 
 class AdaptiveVADTests(unittest.TestCase):
@@ -493,13 +580,20 @@ class ProviderTransportTests(unittest.TestCase):
         timer = threading.Timer(0.05, cancel.set)
         timer.start()
         started = time.monotonic()
+        close_transport = Mock()
         try:
             with self.assertRaises(ProviderRequestCancelled):
-                run_cancellable(lambda: release_request.wait(2), cancel.is_set, poll_seconds=0.01)
+                run_cancellable(
+                    lambda: release_request.wait(2),
+                    cancel.is_set,
+                    poll_seconds=0.01,
+                    on_cancel=close_transport,
+                )
         finally:
             release_request.set()
             timer.cancel()
         self.assertLess(time.monotonic() - started, 0.5)
+        close_transport.assert_called_once_with()
 
 
 class CUDASTTTests(unittest.TestCase):
@@ -677,7 +771,7 @@ class EngineFallbackTests(unittest.TestCase):
             manager.apply_stt_configuration("vulkan", "base")
 
         active_warmup.join.assert_called_once_with()
-        self.assertEqual(gpu_engine.unload_model.call_count, 2)
+        self.assertEqual(gpu_engine.unload_model.call_count, 1)
 
     def test_text_processing_failure_never_reuploads_audio_as_stt_fallback(self):
         manager = EngineManager()
@@ -842,6 +936,17 @@ class FileDecodeTests(unittest.TestCase):
         self.assertIn("00:00:29,000 --> 00:00:33,000", segments_to_srt(segments))
         self.assertTrue(segments_to_vtt(segments).startswith("WEBVTT\n"))
         self.assertIn('"text": "ikinci bölüm"', segments_to_json(segments))
+
+    def test_timed_segments_preserve_silent_chunk_offsets(self):
+        worker = FileTranscribeWorker("sample.wav")
+        segments = worker._build_segments(
+            ["sessizlikten sonraki konuşma"],
+            [30 * 16000],
+            [29],
+        )
+
+        self.assertEqual(segments[0]["start"], 29)
+        self.assertEqual(segments[0]["end"], 59.0)
 
     def test_file_cleanup_runs_once_after_all_stt_chunks(self):
         worker = FileTranscribeWorker("sample.wav")
@@ -1029,6 +1134,14 @@ class ConfigTests(unittest.TestCase):
 
 
 class PasteSafetyTests(unittest.TestCase):
+    def test_captured_target_includes_process_identity(self):
+        injector = PasteInjector()
+        with patch("src.injector.paste_injector.win32gui.GetForegroundWindow", return_value=10), \
+             patch("src.injector.paste_injector.win32gui.IsWindow", return_value=True), \
+             patch("src.injector.paste_injector.win32process.GetWindowThreadProcessId", return_value=(1, 42)), \
+             patch.object(PasteInjector, "_focused_control_for_window", return_value=11):
+            self.assertEqual(injector.capture_target_window(), (10, 42, 11))
+
     def test_auto_paste_disabled_copies_without_sending_paste_keys(self):
         injector = PasteInjector()
         with patch.object(injector, "_safe_copy_to_clipboard", return_value=True) as copy, \
@@ -1045,6 +1158,59 @@ class PasteSafetyTests(unittest.TestCase):
         copy.assert_called_once_with("clipboard only")
         force_foreground.assert_not_called()
         send_paste_keys.assert_not_called()
+
+    def test_auto_paste_without_captured_target_only_copies(self):
+        injector = PasteInjector()
+        with patch.object(injector, "_safe_copy_to_clipboard", return_value=True), \
+             patch("src.injector.paste_injector.config_manager.get", return_value=True), \
+             patch.object(injector, "_send_paste_keys") as send_paste_keys:
+            pasted = injector.paste_text("clipboard only", target_hwnd=None)
+
+        self.assertFalse(pasted)
+        send_paste_keys.assert_not_called()
+
+    def test_reused_window_handle_is_rejected_by_process_identity(self):
+        injector = PasteInjector()
+        with patch.object(injector, "_safe_copy_to_clipboard", return_value=True), \
+             patch("src.injector.paste_injector.config_manager.get", return_value=True), \
+             patch("src.injector.paste_injector.win32process.GetWindowThreadProcessId", return_value=(1, 99)), \
+             patch.object(injector, "_send_paste_keys") as send_paste_keys:
+            pasted = injector.paste_text("safe text", target_hwnd=(10, 42))
+
+        self.assertFalse(pasted)
+        send_paste_keys.assert_not_called()
+
+    def test_elevated_target_is_rejected_from_standard_process(self):
+        injector = PasteInjector()
+        with patch.object(injector, "_safe_copy_to_clipboard", return_value=True), \
+             patch.object(injector, "_is_process_elevated", return_value=True), \
+             patch("src.injector.paste_injector.is_running_as_administrator", return_value=False), \
+             patch("src.injector.paste_injector.config_manager.get", return_value=True), \
+             patch("src.injector.paste_injector.win32process.GetWindowThreadProcessId", return_value=(1, 42)), \
+             patch.object(injector, "_send_paste_keys") as send_paste_keys:
+            pasted = injector.paste_text("safe text", target_hwnd=(10, 42, 11))
+
+        self.assertFalse(pasted)
+        send_paste_keys.assert_not_called()
+
+    def test_clipboard_restore_does_not_overwrite_a_newer_copy(self):
+        injector = PasteInjector()
+        copy = Mock(return_value=True)
+        with patch.object(injector, "_safe_copy_to_clipboard", copy), \
+             patch.object(injector, "_clipboard_sequence", side_effect=[10, 11]), \
+             patch.object(injector, "_force_foreground", return_value=True), \
+             patch.object(injector, "_send_paste_keys", return_value=True), \
+             patch("src.injector.paste_injector.pyperclip.paste", return_value="old"), \
+             patch("src.injector.paste_injector.win32gui.IsWindow", return_value=True), \
+             patch("src.injector.paste_injector.win32gui.GetForegroundWindow", return_value=10), \
+             patch("src.injector.paste_injector.config_manager.get", return_value=True), \
+             patch("src.injector.paste_injector.time.sleep"), \
+             patch("src.injector.paste_injector.threading.Thread") as thread:
+            thread.return_value.start.side_effect = lambda: thread.call_args.kwargs["target"]()
+            pasted = injector.paste_text("new", restore_clipboard=True, target_hwnd=10)
+
+        self.assertTrue(pasted)
+        copy.assert_called_once_with("new")
 
     def test_paste_is_skipped_when_target_focus_cannot_be_restored(self):
         injector = PasteInjector()

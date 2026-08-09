@@ -1,7 +1,5 @@
-import os
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QPixmap
-from src.config import get_resource_path
+from PySide6.QtGui import QIcon
 from src.i18n import translate
 from src.ui.brand import app_mark_pixmap
 
@@ -16,9 +14,9 @@ class SystemTrayManager:
         self._model_resident = False
         self._model_memory_busy = False
 
-        logo_path = get_resource_path(os.path.join("assets", "PrimeDictate-AppIcon.png"))
-        if os.path.exists(logo_path):
-            self.icon = QIcon(app_mark_pixmap(64))
+        logo = app_mark_pixmap(64)
+        if not logo.isNull():
+            self.icon = QIcon(logo)
         else:
             self.icon = QIcon.fromTheme("microphone")
 

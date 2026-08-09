@@ -62,11 +62,28 @@ class CloudSTTEngine(BaseSTTEngine):
         self.last_failure = None
         # The engine instance is retained by EngineManager. Reusing one HTTP
         # pool avoids DNS/TCP/TLS setup on every short dictation.
-        self._session = requests.Session()
-        adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4, max_retries=0)
-        self._session.mount("https://", adapter)
+        self._session = self._new_session()
         self._openai_client = None
         self._openai_api_key = None
+
+    @staticmethod
+    def _new_session():
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4, max_retries=0)
+        session.mount("https://", adapter)
+        return session
+
+    def _cancel_session(self, session):
+        session.close()
+        if self._session is session:
+            self._session = self._new_session()
+
+    def _cancel_openai_client(self, client):
+        if hasattr(client, "close"):
+            client.close()
+        if self._openai_client is client:
+            self._openai_client = None
+            self._openai_api_key = None
 
     def close(self):
         self._session.close()
@@ -119,9 +136,11 @@ class CloudSTTEngine(BaseSTTEngine):
                 }
                 if language != "auto":
                     data["language"] = language
+                session = self._session
                 resp = run_cancellable(
-                    lambda: self._session.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=(5, 45)),
+                    lambda: session.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=(5, 45)),
                     cancel_check,
+                    on_cancel=lambda: self._cancel_session(session),
                 )
                 if resp.status_code == 200:
                     if cancel_check and cancel_check():
@@ -149,7 +168,11 @@ class CloudSTTEngine(BaseSTTEngine):
                 selected_model = model or "gpt-4o-mini-transcribe"
                 request = {"model": selected_model, "file": buffer}
                 request.update(_openai_language_request(selected_model, language))
-                transcript = run_cancellable(lambda: client.audio.transcriptions.create(**request), cancel_check)
+                transcript = run_cancellable(
+                    lambda: client.audio.transcriptions.create(**request),
+                    cancel_check,
+                    on_cancel=lambda: self._cancel_openai_client(client),
+                )
                 if cancel_check and cancel_check():
                     raise TranscriptionCancelled()
                 logger.info("OpenAI cloud transcription completed (%d characters).", len(transcript.text))
@@ -195,11 +218,13 @@ class CloudSTTEngine(BaseSTTEngine):
                         "https://generativelanguage.googleapis.com/v1beta/models/"
                         f"{model or 'gemini-3.6-flash'}:generateContent"
                     )
+                    session = self._session
                     response = run_cancellable(
-                        lambda: self._session.post(
+                        lambda: session.post(
                             url, headers={"x-goog-api-key": api_key_gemini}, json=payload, timeout=(5, 60)
                         ),
                         cancel_check,
+                        on_cancel=lambda: self._cancel_session(session),
                     )
                     if response.status_code == 200:
                         if cancel_check and cancel_check():

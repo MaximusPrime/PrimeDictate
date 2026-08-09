@@ -9,18 +9,47 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, QThread, Slot
+from PySide6.QtCore import QObject, QPoint, QThread, Slot, QMimeData
 from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication
 
 from src.i18n import EN, MESSAGES, set_language, translate
 from src.ui.floating_overlay import FloatingOverlay
+from src.ui.brand import app_mark_pixmap
 from src.ui.main_window import MainWindow
+from src.ui.main_window_pages import MainWindowPagesMixin
+from src.ui.main_window_settings import MainWindowSettingsMixin
+from src.ui.main_window_models import MainWindowModelsMixin
 from src.ui.tray_icon import SystemTrayManager
 from run import AppSignals, PrimeDictateApp
+from src.injector.paste_injector import PasteInjector
 
 
 class UIStructureTests(unittest.TestCase):
+    def test_main_window_responsibilities_are_split_into_components(self):
+        self.assertTrue(issubclass(MainWindow, MainWindowPagesMixin))
+        self.assertTrue(issubclass(MainWindow, MainWindowSettingsMixin))
+        self.assertTrue(issubclass(MainWindow, MainWindowModelsMixin))
+        self.assertLess(len(Path(MainWindow.__module__.replace(".", "/") + ".py").read_text(encoding="utf-8").splitlines()), 1000)
+
+    def test_clipboard_snapshot_preserves_rich_mime_formats(self):
+        app = QApplication.instance() or QApplication([])
+        mime_data = QMimeData()
+        mime_data.setText("plain")
+        mime_data.setHtml("<b>rich</b>")
+        app.clipboard().setMimeData(mime_data)
+
+        snapshot = PasteInjector._capture_clipboard_snapshot()
+        app.clipboard().setText("replacement")
+        self.assertTrue(PasteInjector._restore_clipboard_snapshot(snapshot))
+
+        restored = app.clipboard().mimeData()
+        self.assertEqual(restored.text(), "plain")
+        self.assertEqual(restored.html(), "<b>rich</b>")
+        # The offscreen Windows Qt plugin must not retain test-owned rich MIME
+        # data while QApplication is torn down.
+        app.clipboard().clear()
+
     def test_quit_hides_all_surfaces_and_quits_even_if_worker_is_slow(self):
         controller = PrimeDictateApp.__new__(PrimeDictateApp)
         controller._quitting = False
@@ -292,6 +321,7 @@ class UIStructureTests(unittest.TestCase):
     def test_history_empty_and_filtered_states_update_actions(self):
         window = MainWindow()
         with patch("src.ui.main_window.config_manager.load_history", return_value=[]):
+            window.history_store.invalidate()
             window.refresh_history_list()
         self.assertFalse(window.history_empty_label.isHidden())
         self.assertTrue(window.history_list.isHidden())
@@ -299,6 +329,7 @@ class UIStructureTests(unittest.TestCase):
 
         history = [{"time": "2026-08-08 10:00:00", "text": "örnek dikte"}]
         with patch("src.ui.main_window.config_manager.load_history", return_value=history):
+            window.history_store.invalidate()
             window.history_search.setText("örnek")
         self.assertEqual(window.history_list.count(), 1)
         self.assertFalse(window.history_list.isHidden())
@@ -462,10 +493,17 @@ class UIStructureTests(unittest.TestCase):
         self.assertFalse(overlay.status_label.wordWrap())
         self.assertEqual(overlay.status_label.text(), "Panoya Kopyalandı")
         self.assertEqual(overlay.status_label.toolTip(), "Metin panoya kopyalandı")
+        self.assertNotIn("#10b981", overlay.status_label.styleSheet())
+        self.assertIn("rgba(196, 167, 110, 210)", overlay.status_label.styleSheet())
         self.assertLess(overlay.status_label.geometry().bottom(), overlay.container.geometry().top())
         self.assertEqual(overlay.container.width(), overlay.CONTROL_IDLE_WIDTH)
         self.assertEqual(overlay.width(), 218)
         overlay.close()
+
+    def test_app_logo_uses_independently_bundled_fallback(self):
+        root_logo = str(Path(__file__).resolve().parents[1] / "PrimeDictate-Logo.png")
+        with patch("src.ui.brand.get_resource_path", side_effect=["missing-app-icon.png", root_logo]):
+            self.assertFalse(app_mark_pixmap(24).isNull())
 
     def test_overlay_recording_control_uses_compact_width_and_keeps_status_visible(self):
         overlay = FloatingOverlay()

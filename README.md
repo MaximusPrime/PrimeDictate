@@ -120,7 +120,11 @@ Installed and portable editions use the current Windows profile rather than writ
 
 API credentials are stored in Windows Credential Manager. Diagnostic bundles redact tokens, provider secrets, and Windows user-profile paths; they do not include transcript history, recordings, or API credentials.
 
-Clipboard insertion remembers the target window before recording and restores focus only when safe. If the target cannot be restored, the result remains on the clipboard instead of being pasted into an unintended window. Plain-text clipboard restoration does not preserve images, file lists, HTML, or other rich formats.
+Clipboard insertion remembers one foreground target window and its owning process before recording, then restores focus only when safe. If that target cannot be restored or no external target was captured, the result remains on the clipboard instead of being pasted into an unintended window. A sent paste command cannot prove that every target application accepted it. When the Qt clipboard is available, restoration preserves its advertised MIME formats (including rich text, images, and file lists); restoration is skipped if another application or the user changes the clipboard after injection.
+
+### Administrator mode
+
+Installed and portable builds both run with standard user rights by default. Enable **Run PrimeDictate as administrator** in Settings only when dictating into elevated applications. On the next launch, PrimeDictate relaunches itself through the official Windows `runas` UAC flow. Disabling the option returns subsequent launches to standard rights. The installer may request elevation to write under Program Files, but it does not force the installed application to remain elevated; the portable executable uses the same opt-in runtime behavior. Combining administrator mode with **Start with Windows** causes a UAC prompt at every sign-in, so standard mode is recommended unless elevated targets are part of the daily workflow.
 
 ## File Transcription
 
@@ -200,6 +204,8 @@ PrimeDictate/
 
 See [Architecture](docs/ARCHITECTURE.md) for component contracts and data flow.
 
+Release validation uses the [Windows paste compatibility matrix](docs/WINDOWS_COMPATIBILITY_MATRIX.md). Rows requiring Office, browsers, elevated applications, Remote Desktop or specific GPU hardware are physical release checks and cannot be proven by mocked CI alone.
+
 ## Verification Boundaries
 
 - The application is Windows-only.
@@ -213,6 +219,8 @@ See [Architecture](docs/ARCHITECTURE.md) for component contracts and data flow.
 
 - [Turkish User Guide](docs/USER_GUIDE_TR.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Windows compatibility matrix](docs/WINDOWS_COMPATIBILITY_MATRIX.md)
+- [Windows release checklist](docs/RELEASE_CHECKLIST.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Vulkan Runtime Provenance](runtime/whisper-vulkan/PROVENANCE.md)

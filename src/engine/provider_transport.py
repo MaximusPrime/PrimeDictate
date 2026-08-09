@@ -53,8 +53,8 @@ def failure_from_exception(provider: str, error: Exception) -> ProviderFailure:
     return ProviderFailure(provider, code, status == 429 or isinstance(status, int) and status >= 500, status, request_id)
 
 
-def run_cancellable(request, cancel_check=None, poll_seconds: float = 0.05):
-    """Return promptly on cooperative cancellation and discard a late HTTP result."""
+def run_cancellable(request, cancel_check=None, poll_seconds: float = 0.05, on_cancel=None):
+    """Cancel the owning transport, return promptly and discard late results."""
     if not cancel_check:
         return request()
     if cancel_check():
@@ -71,6 +71,11 @@ def run_cancellable(request, cancel_check=None, poll_seconds: float = 0.05):
     threading.Thread(target=execute, daemon=True, name="ProviderRequest").start()
     while True:
         if cancel_check():
+            if on_cancel:
+                try:
+                    on_cancel()
+                except Exception:
+                    pass
             raise ProviderRequestCancelled()
         try:
             succeeded, value = results.get(timeout=poll_seconds)

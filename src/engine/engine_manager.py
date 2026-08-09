@@ -28,6 +28,11 @@ class EngineManager:
         self._warmup_thread = None
         self._warmup_ready = threading.Event()
         self._warmup_ready.set()
+        # Native model loaders and inference runtimes are not safe to mutate
+        # concurrently.  This lock serializes warmup, inference and explicit
+        # load/unload operations without blocking the Qt thread during normal
+        # background work.
+        self._engine_lock = threading.RLock()
 
     def get_engine(self, backend: str):
         if backend not in self.engines:
@@ -42,14 +47,15 @@ class EngineManager:
         return self.engines[backend]
 
     def shutdown(self):
-        for engine in tuple(self.engines.values()):
-            close = getattr(engine, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    logger.exception("Could not close transcription engine cleanly.")
-        self.engines.clear()
+        with self._engine_lock:
+            for engine in tuple(self.engines.values()):
+                close = getattr(engine, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        logger.exception("Could not close transcription engine cleanly.")
+            self.engines.clear()
 
     def is_model_resident(self, backend: str = None) -> bool:
         backend = backend or config_manager.get("stt_backend", "cpu")
@@ -61,27 +67,17 @@ class EngineManager:
         return bool(self._warmup_thread and self._warmup_thread.is_alive())
 
     def unload_model(self, backend: str = None):
-        backend = backend or config_manager.get("stt_backend", "cpu")
-        engine = self.engines.get(backend)
-        unload = getattr(engine, "unload_model", None)
-        if callable(unload):
-            unload()
+        with self._engine_lock:
+            backend = backend or config_manager.get("stt_backend", "cpu")
+            engine = self.engines.get(backend)
+            unload = getattr(engine, "unload_model", None)
+            if callable(unload):
+                unload()
 
     def apply_stt_configuration(self, previous_backend: str = None, previous_model: str = None):
         """Reconcile resident local engines after the saved STT selection changes."""
         backend = config_manager.get("stt_backend", "cpu")
         model = config_manager.get("model_size", "base")
-
-        for engine_backend in ("cuda", "vulkan"):
-            engine = self.engines.get(engine_backend)
-            if engine is None:
-                continue
-            resident_model = getattr(engine, "model_name", None)
-            selection_changed = engine_backend != backend or resident_model != model
-            if selection_changed:
-                unload = getattr(engine, "unload_model", None)
-                if callable(unload):
-                    unload()
 
         active_warmup = self._warmup_thread
         if active_warmup and active_warmup.is_alive():
@@ -99,23 +95,36 @@ class EngineManager:
             ).start()
             return
 
+        with self._engine_lock:
+            for engine_backend in ("cuda", "vulkan"):
+                engine = self.engines.get(engine_backend)
+                if engine is None:
+                    continue
+                resident_model = getattr(engine, "model_name", None)
+                selection_changed = engine_backend != backend or resident_model != model
+                if selection_changed:
+                    unload = getattr(engine, "unload_model", None)
+                    if callable(unload):
+                        unload()
+
         if backend in {"cuda", "vulkan"} and (
             backend != previous_backend or model != previous_model
         ):
             self.start_warmup()
 
     def load_selected_model(self, backend: str = None):
-        backend = backend or config_manager.get("stt_backend", "cpu")
-        if backend not in {"cuda", "vulkan"}:
-            return
-        engine = self.get_engine(backend)
-        engine.load_model(
-            config_manager.get("model_size", "base"),
-            _validated_language(config_manager.get("language", "tr")),
-        )
-        warmup = getattr(engine, "warmup", None)
-        if callable(warmup):
-            warmup()
+        with self._engine_lock:
+            backend = backend or config_manager.get("stt_backend", "cpu")
+            if backend not in {"cuda", "vulkan"}:
+                return
+            engine = self.get_engine(backend)
+            engine.load_model(
+                config_manager.get("model_size", "base"),
+                _validated_language(config_manager.get("language", "tr")),
+            )
+            warmup = getattr(engine, "warmup", None)
+            if callable(warmup):
+                warmup()
 
     def start_warmup(self):
         backend = config_manager.get("stt_backend", "cpu")
@@ -131,11 +140,12 @@ class EngineManager:
         def worker():
             started = time.perf_counter()
             try:
-                engine = self.get_engine(backend)
-                engine.load_model(model_size, language)
-                warmup = getattr(engine, "warmup", None)
-                if callable(warmup):
-                    warmup()
+                with self._engine_lock:
+                    engine = self.get_engine(backend)
+                    engine.load_model(model_size, language)
+                    warmup = getattr(engine, "warmup", None)
+                    if callable(warmup):
+                        warmup()
                 logger.info(
                     "Transcription engine warmup completed backend=%s seconds=%.3f.",
                     backend,
@@ -159,6 +169,8 @@ class EngineManager:
         if cancel_check and cancel_check():
             raise TranscriptionCancelled()
         self.last_error = None
+        # The event is only a fast path.  The engine lock below remains the
+        # source of truth if a slow first load takes longer than 30 seconds.
         self._warmup_ready.wait(timeout=30)
 
         backend = config_manager.get("stt_backend", "cpu")
@@ -168,6 +180,9 @@ class EngineManager:
 
         logger.info(f"Processing audio with backend '{backend}', model '{model_size}', lang '{language}'")
 
+        while not self._engine_lock.acquire(timeout=0.05):
+            if cancel_check and cancel_check():
+                raise TranscriptionCancelled()
         try:
             engine = self.get_engine(backend)
             if backend != "cloud":
@@ -222,6 +237,8 @@ class EngineManager:
                 except Exception as ex:
                     logger.error(f"Cloud fallback also failed: {ex}")
             return ""
+        finally:
+            self._engine_lock.release()
 
     def _capture_transcription_info(self, engine, backend: str, requested_language: str, transcription_seconds=None, audio_seconds=None):
         real_time_factor = None
