@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QLineEdit, QPushButton, QCheckBox, QTextEdit,
     QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QApplication,
     QFileDialog, QButtonGroup, QStackedWidget, QScrollArea,
-    QFrame, QGridLayout, QSystemTrayIcon
+    QFrame, QGridLayout, QSystemTrayIcon, QSizePolicy
 )
 
 from src import __version__
@@ -66,10 +66,13 @@ class MainWindowPagesMixin:
         hero = QFrame()
         hero.setObjectName("heroCard")
         hero_layout = QHBoxLayout(hero)
+        self.dashboard_hero_layout = hero_layout
         hero_layout.setContentsMargins(26, 24, 26, 24)
         hero_text = QVBoxLayout()
         self.hero_title = QLabel("Konuşun. Gerisini Prime Dictate halletsin.")
         self.hero_title.setObjectName("heroTitle")
+        self.hero_title.setWordWrap(True)
+        self.hero_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.hero_caption = QLabel("Global kısayolunuzla herhangi bir uygulamada dikteye başlayın.")
         self.hero_caption.setObjectName("heroCaption")
         self.hero_caption.setWordWrap(True)
@@ -83,6 +86,7 @@ class MainWindowPagesMixin:
 
         hero_focus = QFrame()
         hero_focus.setObjectName("heroFocus")
+        hero_focus.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         focus_layout = QVBoxLayout(hero_focus)
         focus_layout.setContentsMargins(20, 16, 20, 16)
         focus_layout.setSpacing(5)
@@ -680,6 +684,8 @@ class MainWindowPagesMixin:
 
         language_note = QLabel("Dil ve görünüm değişiklikleri ayarlar kaydedildiğinde uygulanır.")
         language_note.setObjectName("mutedLabel")
+        language_note.setWordWrap(True)
+        language_note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         language_layout.addWidget(language_note)
         layout.addWidget(language_group)
 
@@ -700,6 +706,9 @@ class MainWindowPagesMixin:
         hk_mode_lbl.setObjectName("fieldLabel")
         h2.addWidget(hk_mode_lbl)
         self.hotkey_mode_combo = QComboBox(hotkey_group)
+        self.hotkey_mode_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.hotkey_mode_combo.setMinimumContentsLength(18)
+        self.hotkey_mode_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.hotkey_mode_combo.addItem("Bas-Konuş (Push-to-Talk): Tuşa basılı tutulduğu sürece dikte aktif olur.", "hold")
         self.hotkey_mode_combo.addItem("Aç / Kapat (Toggle): Tuşa bir kez basıldığında başlar, tekrar basıldığında durur.", "toggle")
         self.hotkey_mode_combo.currentIndexChanged.connect(self._sync_hotkey_settings_live)
@@ -719,6 +728,9 @@ class MainWindowPagesMixin:
         h3 = QHBoxLayout()
         h3.addWidget(QLabel("Mikrofon Aygıtı:"))
         self.mic_combo = QComboBox(audio_group)
+        self.mic_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.mic_combo.setMinimumContentsLength(18)
+        self.mic_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.refresh_mic_list()
         h3.addWidget(self.mic_combo)
         a_layout.addLayout(h3)
@@ -771,6 +783,20 @@ class MainWindowPagesMixin:
         self.admin_mode_status.setWordWrap(True)
         self.admin_mode_cb.toggled.connect(self._update_admin_mode_status)
         self.start_windows_cb.toggled.connect(self._update_admin_mode_status)
+
+        # Checkbox captions should consume the available row width without
+        # forcing the scroll page wider than its viewport on compact windows.
+        for checkbox in (
+            self.auto_paste_cb,
+            self.restore_clip_cb,
+            self.history_enabled_cb,
+            self.play_sound_cb,
+            self.overlay_cb,
+            self.overlay_always_on_cb,
+            self.start_windows_cb,
+            self.admin_mode_cb,
+        ):
+            checkbox.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
         b_layout.addWidget(self.auto_paste_cb)
         b_layout.addWidget(self.restore_clip_cb)

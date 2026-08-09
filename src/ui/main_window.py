@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QComboBox as QtQComboBox, QLineEdit, QPushButton, QCheckBox, QTextEdit,
     QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QApplication,
     QFileDialog, QButtonGroup, QStackedWidget, QScrollArea,
-    QFrame, QGridLayout, QSystemTrayIcon
+    QFrame, QGridLayout, QSystemTrayIcon, QBoxLayout
 )
 
 from src import __version__
@@ -74,7 +74,9 @@ class MainWindow(MainWindowPagesMixin, MainWindowSettingsMixin, MainWindowModels
         self._geometry_save_timer.setSingleShot(True)
         self._geometry_save_timer.setInterval(400)
         self._geometry_save_timer.timeout.connect(self._save_window_geometry)
-        self.resize(1320, 820)
+        # Match the compact geometry selected during the final UI tuning pass.
+        # Individual pages must remain usable at this first-run size.
+        self.resize(960, 677)
         self.setMinimumSize(960, 640)
         self.setStyleSheet(PREMIUM_STYLE)
 
@@ -130,6 +132,10 @@ class MainWindow(MainWindowPagesMixin, MainWindowSettingsMixin, MainWindowModels
             return
         target_width = 210 if self.width() < 1080 else self._preferred_sidebar_width
         self.sidebar_widget.setFixedWidth(target_width)
+        if hasattr(self, "dashboard_hero_layout"):
+            # The dashboard action card belongs in the intentionally reserved
+            # right column, including at the compact first-run width.
+            self.dashboard_hero_layout.setDirection(QBoxLayout.LeftToRight)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -297,7 +303,7 @@ class MainWindow(MainWindowPagesMixin, MainWindowSettingsMixin, MainWindowModels
         self.nav_buttons[index].setChecked(True)
         self.page_title.setText(translate(title_key))
         self.page_subtitle.setText(translate(subtitle_key))
-        self.footer_widget.setVisible(index != len(self.PAGE_DEFINITIONS) - 1)
+        self.footer_widget.setVisible(index not in (0, len(self.PAGE_DEFINITIONS) - 1))
         self.dictate_btn.setVisible(index != 0)
         current_page = self.pages.currentWidget()
         if isinstance(current_page, QScrollArea):

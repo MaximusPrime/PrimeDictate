@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, QPoint, QThread, Slot, QMimeData
 from PySide6.QtGui import QShortcut
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QBoxLayout
 
 from src.i18n import EN, MESSAGES, set_language, translate
 from src.ui.floating_overlay import FloatingOverlay
@@ -252,6 +252,34 @@ class UIStructureTests(unittest.TestCase):
         window.resize(1200, 700)
         window._update_responsive_layout()
         self.assertEqual(window.sidebar_widget.width(), window._preferred_sidebar_width)
+        window.close()
+
+    def test_first_run_size_and_affected_pages_fit_without_horizontal_scroll(self):
+        with patch("src.ui.main_window.config_manager.get", side_effect=lambda key, default=None: default):
+            window = MainWindow()
+        self.assertEqual((window.width(), window.height()), (960, 677))
+        window.show()
+        QApplication.processEvents()
+
+        for page_index in (0, 4):
+            window._set_page(page_index)
+            QApplication.processEvents()
+            scroll = window.pages.currentWidget()
+            self.assertFalse(scroll.horizontalScrollBar().isVisible())
+            self.assertLessEqual(scroll.widget().minimumSizeHint().width(), scroll.viewport().width())
+
+        window.close()
+
+    def test_dashboard_uses_right_action_column_and_hides_settings_footer(self):
+        window = MainWindow()
+        window.resize(960, 677)
+        window._update_responsive_layout()
+        window._set_page(0)
+
+        self.assertEqual(window.dashboard_hero_layout.direction(), QBoxLayout.LeftToRight)
+        self.assertTrue(window.footer_widget.isHidden())
+        window._set_page(4)
+        self.assertFalse(window.footer_widget.isHidden())
         window.close()
 
     def test_tray_menu_is_state_aware_and_fully_retranslated(self):
@@ -514,7 +542,7 @@ class UIStructureTests(unittest.TestCase):
         self.assertEqual(overlay.status_label.toolTip(), "Metin panoya kopyalandı")
         self.assertLessEqual(overlay.status_label.width(), overlay.STATUS_MAX_WIDTH)
         self.assertNotIn("#10b981", overlay.status_label.styleSheet())
-        self.assertIn("rgba(196, 167, 110, 210)", overlay.status_label.styleSheet())
+        self.assertNotIn("border-radius", overlay.status_label.styleSheet())
         self.assertLess(overlay.status_label.geometry().bottom(), overlay.container.geometry().top())
         self.assertEqual(overlay.container.width(), overlay.CONTROL_IDLE_WIDTH)
         self.assertEqual(overlay.width(), 218)

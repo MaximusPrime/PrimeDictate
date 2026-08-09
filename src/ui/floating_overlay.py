@@ -156,12 +156,31 @@ class OverlaySurface(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        rect = QRectF(self.rect()).adjusted(1.25, 1.25, -1.25, -1.25)
         bg_color = QColor("#0d1117")
         border_color = QColor(196, 167, 110, 210)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 14.0, 14.0)
         painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(border_color, 1.25))
-        painter.drawRoundedRect(rect, 15.0, 15.0)
+        painter.setPen(QPen(border_color, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+
+
+class OverlayStatusLabel(QLabel):
+    """Paint the translucent pill as a vector path instead of a QSS border."""
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(1.25, 1.25, -1.25, -1.25)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 9.0, 9.0)
+        painter.setBrush(QColor(13, 17, 23, 238))
+        painter.setPen(QPen(QColor(196, 167, 110, 210), 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QColor("#e8dfca"))
+        painter.setFont(self.font())
+        painter.drawText(self.rect().adjusted(10, 0, -10, 0), Qt.AlignCenter, self.text())
 
 
 class FloatingOverlay(QWidget):
@@ -209,22 +228,15 @@ class FloatingOverlay(QWidget):
         main_layout.setContentsMargins(3, 3, 3, 3)
         main_layout.setSpacing(2)
 
-        self.status_label = QLabel(translate("overlay.status.ready"))
+        self.status_label = OverlayStatusLabel(translate("overlay.status.ready"))
         self.status_label.setObjectName("overlayStatus")
         self.status_label.setFixedSize(self.STATUS_MIN_WIDTH, 27)
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(False)
-        self.status_label.setStyleSheet("""
-            QLabel#overlayStatus {
-                color: #c8d0da;
-                background: rgba(13, 17, 23, 238);
-                border: 1px solid rgba(111, 166, 180, 150);
-                border-radius: 10px;
-                padding: 0 10px;
-                font-size: 9px;
-                font-weight: 600;
-            }
-        """)
+        self.status_label.setStyleSheet(
+            "QLabel#overlayStatus { background: transparent; border: none; "
+            "font-size: 9px; font-weight: 600; }"
+        )
         self.status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         self.container = OverlaySurface(self)
@@ -330,19 +342,6 @@ class FloatingOverlay(QWidget):
 
     def set_status(self, text: str, color_hex: str = "#edf0f3", tooltip_text: str = None):
         self.status_label.setText(text)
-        self.status_label.setStyleSheet(
-            """
-            QLabel#overlayStatus {
-                color: #e8dfca;
-                background: rgba(13, 17, 23, 238);
-                border: 1px solid rgba(196, 167, 110, 210);
-                border-radius: 10px;
-                padding: 0 10px;
-                font-size: 9px;
-                font-weight: 600;
-            }
-            """
-        )
         metrics = QFontMetrics(self.status_label.font())
         longest_message = max(
             (translate(key) for key in self.STATUS_MESSAGE_KEYS),
