@@ -145,8 +145,9 @@ class PrimeDictateApp(QObject):
             )
 
         if config_manager.get("overlay_enabled", True) and config_manager.get("overlay_always_on", False):
-            self.overlay.set_recording_active(False)
-            self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3")
+            if self.state == AppState.IDLE:
+                self.overlay.set_idle_active()
+                self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3")
             self.overlay.show()
         elif not config_manager.get("overlay_always_on", False) and self.state == AppState.IDLE:
             self.overlay.hide()
@@ -175,7 +176,7 @@ class PrimeDictateApp(QObject):
             if self.state == AppState.IDLE:
                 self.main_window.set_app_state(AppState.IDLE.value, translate("status.ready"))
                 if config_manager.get("overlay_enabled", True) and config_manager.get("overlay_always_on", False):
-                    self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3")
+                    self._settle_overlay_if_idle()
         if active and not self._shutdown_requested.is_set():
             QTimer.singleShot(500, self._poll_model_warmup)
 
@@ -412,14 +413,15 @@ class PrimeDictateApp(QObject):
         self._set_state(AppState.ERROR, msg)
         if config_manager.get("overlay_enabled", True):
             self.overlay.set_status(translate("overlay.status.error"), color_hex, tooltip_text=msg)
-            if config_manager.get("overlay_always_on", False):
-                QTimer.singleShot(1800, lambda: (self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3"), self.overlay.set_recording_active(False)))
-            else:
-                QTimer.singleShot(1800, self.overlay.hide)
-        QTimer.singleShot(1800, lambda: self._set_state(AppState.IDLE, translate("status.ready")))
+        QTimer.singleShot(1800, self._recover_from_dictation_error)
 
     def _set_state(self, state: AppState, message: str):
         self.state = state
+        # IDLE is the single source of truth for reusable controls.  In
+        # particular, error/empty-audio paths must clear the overlay's
+        # processing flag instead of only changing its visible status text.
+        if state == AppState.IDLE and hasattr(self, "overlay"):
+            self.overlay.set_idle_active()
         self.hotkey_listener.sync_recording_state(state == AppState.RECORDING)
         self.main_window.set_app_state(state.value, message)
         if hasattr(self, "tray"):
@@ -433,9 +435,19 @@ class PrimeDictateApp(QObject):
 
     def _settle_overlay_if_idle(self):
         if self.state == AppState.IDLE:
-            self.overlay.set_processing_active(False)
-            self.overlay.set_recording_active(False)
+            self.overlay.set_idle_active()
             self.overlay.set_status(translate("overlay.status.ready"), "#edf0f3")
+
+    def _recover_from_dictation_error(self):
+        if self.state != AppState.ERROR:
+            return
+        self._set_state(AppState.IDLE, translate("status.ready"))
+        if not config_manager.get("overlay_enabled", True):
+            return
+        if config_manager.get("overlay_always_on", False):
+            self._settle_overlay_if_idle()
+        else:
+            self._hide_overlay_if_idle()
 
     def _hide_overlay_if_idle(self):
         if self.state == AppState.IDLE:

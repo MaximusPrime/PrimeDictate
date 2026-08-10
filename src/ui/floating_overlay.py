@@ -382,6 +382,17 @@ class FloatingOverlay(QWidget):
         self.play_button.setVisible(not self._recording_active)
         self.play_button.setEnabled(not active and not self._recording_active)
 
+    def set_idle_active(self):
+        """Return every overlay control to its reusable idle state."""
+        self._recording_active = False
+        self._processing_active = False
+        self.container.setFixedWidth(self.CONTROL_IDLE_WIDTH)
+        self.visualizer.setVisible(False)
+        self.stop_button.setVisible(False)
+        self.stop_button.setEnabled(False)
+        self.play_button.setVisible(True)
+        self.play_button.setEnabled(True)
+
     def _request_start(self):
         if self.start_callback and self.play_button.isEnabled():
             self.start_callback()

@@ -21,7 +21,7 @@ from src.ui.main_window_pages import MainWindowPagesMixin
 from src.ui.main_window_settings import MainWindowSettingsMixin
 from src.ui.main_window_models import MainWindowModelsMixin
 from src.ui.tray_icon import SystemTrayManager
-from run import AppSignals, PrimeDictateApp
+from run import AppSignals, AppState, PrimeDictateApp
 from src.injector.paste_injector import PasteInjector
 
 
@@ -550,6 +550,51 @@ class UIStructureTests(unittest.TestCase):
         overlay.play_button.click()
         callback.assert_not_called()
         overlay.close()
+
+    def test_overlay_idle_state_clears_processing_and_reenables_play(self):
+        overlay = FloatingOverlay()
+        overlay.set_processing_active(True)
+
+        overlay.set_idle_active()
+
+        self.assertFalse(overlay._processing_active)
+        self.assertFalse(overlay._recording_active)
+        self.assertTrue(overlay.play_button.isVisibleTo(overlay))
+        self.assertTrue(overlay.play_button.isEnabled())
+        self.assertFalse(overlay.stop_button.isVisibleTo(overlay))
+        overlay.close()
+
+    def test_failed_dictation_recovers_ready_overlay_and_play_button(self):
+        controller = PrimeDictateApp.__new__(PrimeDictateApp)
+        controller.state = AppState.TRANSCRIBING
+        controller._shutdown_requested = threading.Event()
+        controller._finish_dictation_operation = Mock()
+        controller.hotkey_listener = Mock()
+        controller.main_window = Mock()
+        controller.overlay = FloatingOverlay()
+        controller.overlay.set_processing_active(True)
+        scheduled = []
+
+        def get_config(key, default=None):
+            return {
+                "overlay_enabled": True,
+                "overlay_always_on": True,
+                "setup_completed": True,
+            }.get(key, default)
+
+        with patch("run.config_manager.get", side_effect=get_config), \
+             patch("run.QTimer.singleShot", side_effect=lambda delay, callback: scheduled.append(callback)):
+            controller._on_status_changed("Ses algılanmadı", "#ef4444")
+            self.assertEqual(controller.state, AppState.ERROR)
+            self.assertFalse(controller.overlay.play_button.isEnabled())
+
+            self.assertEqual(len(scheduled), 1)
+            scheduled[0]()
+
+        self.assertEqual(controller.state, AppState.IDLE)
+        self.assertEqual(controller.overlay.status_label.text(), translate("overlay.status.ready"))
+        self.assertTrue(controller.overlay.play_button.isEnabled())
+        controller.overlay.close()
 
     def test_overlay_status_sits_above_control_and_keeps_detailed_tooltip(self):
         overlay = FloatingOverlay()
