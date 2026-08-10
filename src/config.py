@@ -151,6 +151,7 @@ DEFAULT_CONFIG = {
     "restore_clipboard": True,
     "history_enabled": True,
     "play_sound": True,
+    "mute_other_audio": False,
     "start_with_windows": False,
     "run_as_administrator": False,
     "overlay_enabled": True,

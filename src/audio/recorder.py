@@ -107,7 +107,11 @@ class AudioRecorder:
         self._audio_spool = tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024, mode="w+b")
         self.level_callback = level_callback
         self.limit_callback = limit_callback
-        self.native_sample_rate = self._get_device_sample_rate()
+        device_sample_rate = self._get_device_sample_rate()
+        # Ask PortAudio for the STT target rate first. When the device/host API
+        # accepts it, no post-recording resample or first-use SciPy import is
+        # needed. Fall back to the device-native rate for strict WASAPI devices.
+        self.native_sample_rate = TARGET_SAMPLE_RATE
         self.recorded_samples = 0
         self._limit_notified = False
         self.smoothed_level = None
@@ -143,16 +147,19 @@ class AudioRecorder:
         except Exception as e:
             self.is_recording = False
             logger.error(f"Failed to start InputStream @ {self.native_sample_rate}Hz: {e}")
-            # Retry with 16000Hz fallback if custom rate failed
+            # Retry at the device's advertised native rate if 16 kHz is not
+            # supported by its Windows host API.
             try:
-                self.native_sample_rate = 16000
+                if device_sample_rate == TARGET_SAMPLE_RATE:
+                    raise
+                self.native_sample_rate = device_sample_rate
                 if self.max_duration_seconds:
                     self.max_samples = max(1, int(self.max_duration_seconds * self.native_sample_rate))
-                kwargs['samplerate'] = 16000
+                kwargs['samplerate'] = self.native_sample_rate
                 self.stream = sd.InputStream(**kwargs)
                 self.stream.start()
                 self.is_recording = True
-                logger.info("Fallback to 16000Hz InputStream succeeded.")
+                logger.info("Fallback to native-rate InputStream succeeded at %sHz.", self.native_sample_rate)
             except Exception as ex:
                 self.is_recording = False
                 if self._audio_spool is not None:

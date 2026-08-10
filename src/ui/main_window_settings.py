@@ -217,6 +217,7 @@ class MainWindowSettingsMixin:
         self.restore_clip_cb.setChecked(config_manager.get("restore_clipboard", True))
         self.history_enabled_cb.setChecked(config_manager.get("history_enabled", True))
         self.play_sound_cb.setChecked(config_manager.get("play_sound", True))
+        self.mute_other_audio_cb.setChecked(config_manager.get("mute_other_audio", False))
         self.overlay_cb.setChecked(config_manager.get("overlay_enabled", True))
         try:
             saved_recording_limit = min(600, int(config_manager.get("max_recording_seconds", 300)))
@@ -321,6 +322,7 @@ class MainWindowSettingsMixin:
             "restore_clipboard": self.restore_clip_cb.isChecked(),
             "history_enabled": self.history_enabled_cb.isChecked(),
             "play_sound": self.play_sound_cb.isChecked(),
+            "mute_other_audio": self.mute_other_audio_cb.isChecked(),
             "overlay_enabled": self.overlay_cb.isChecked(),
             "overlay_always_on": self.overlay_always_on_cb.isChecked(),
             "start_with_windows": self.start_windows_cb.isChecked(),

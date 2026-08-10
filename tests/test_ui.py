@@ -244,6 +244,26 @@ class UIStructureTests(unittest.TestCase):
         self.assertTrue(all(button.accessibleName() for button in window.nav_buttons))
         window.close()
 
+    def test_header_status_preserves_message_start_and_full_tooltip(self):
+        window = MainWindow()
+        window._set_page(1)
+        message = "●  OpenAI STT isteği başarısız oldu (kota veya hız sınırı aşıldı; HTTP 429)."
+
+        window.status_label.setText(message)
+
+        self.assertTrue(window.status_label.text().startswith("●  "))
+        self.assertEqual(window.status_label.fullText(), message)
+        self.assertEqual(window.status_label.toolTip(), message)
+        self.assertLessEqual(window.status_label.width(), window.status_label.MAX_WIDTH)
+        window.show()
+        self.app.processEvents()
+        self.assertTrue(window.dictate_btn.isVisible())
+        self.assertLessEqual(
+            window.dictate_btn.mapTo(window, window.dictate_btn.rect().topRight()).x(),
+            window.width(),
+        )
+        window.close()
+
     def test_sidebar_uses_compact_width_on_narrow_window(self):
         window = MainWindow()
         window.resize(1000, 700)

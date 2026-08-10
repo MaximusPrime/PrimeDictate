@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 import zipfile
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import numpy as np
 import soundfile as sf
@@ -29,6 +29,7 @@ from src.engine.stt_base import TranscriptionCancelled
 from src.injector.paste_injector import PasteInjector
 from src.operation_coordinator import OperationCoordinator
 from src.audio.recorder import AudioRecorder
+from src.audio.session_silencer import AudioSessionSilencer
 from src.audio.vad import is_audio_meaningful, trim_silence
 from src.logging_config import SensitiveDataFilter
 from src.diagnostics import create_diagnostics_bundle
@@ -327,6 +328,30 @@ class AudioRecorderLimitTests(unittest.TestCase):
         stream.return_value.start.assert_called_once_with()
         recorder.stop_recording()
 
+    def test_live_recording_prefers_stt_sample_rate(self):
+        recorder = AudioRecorder()
+        with patch.object(recorder, "_get_device_sample_rate", return_value=48000), \
+             patch("src.audio.recorder.sd.InputStream") as stream:
+            recorder.start_recording(max_duration_seconds=60)
+
+        self.assertEqual(stream.call_args.kwargs["samplerate"], 16000)
+        self.assertEqual(recorder.native_sample_rate, 16000)
+        recorder.stop_recording()
+
+    def test_live_recording_falls_back_to_native_sample_rate(self):
+        recorder = AudioRecorder()
+        first_stream = Mock()
+        first_stream.start.side_effect = RuntimeError("unsupported rate")
+        second_stream = Mock()
+        with patch.object(recorder, "_get_device_sample_rate", return_value=48000), \
+             patch("src.audio.recorder.sd.InputStream", side_effect=(first_stream, second_stream)) as stream:
+            recorder.start_recording(max_duration_seconds=60)
+
+        self.assertEqual(stream.call_count, 2)
+        self.assertEqual(stream.call_args.kwargs["samplerate"], 48000)
+        self.assertEqual(recorder.native_sample_rate, 48000)
+        recorder.stop_recording()
+
     def test_resampling_failure_does_not_return_mislabeled_audio(self):
         recorder = AudioRecorder()
         recorder.is_recording = True
@@ -500,6 +525,12 @@ class CloudSTTTests(unittest.TestCase):
         self.assertNotIn("language", create.call_args.kwargs)
         self.assertEqual(create.call_args.kwargs["extra_body"], {"languages": ["tr"]})
 
+    def test_openai_diarize_enables_required_chunking(self):
+        result, create = self._transcribe_with_openai("gpt-4o-transcribe-diarize")
+
+        self.assertEqual(result, "Merhaba")
+        self.assertEqual(create.call_args.kwargs["chunking_strategy"], "auto")
+
     def test_openai_unknown_model_omits_language_hint(self):
         result, create = self._transcribe_with_openai("private-transcriber")
 
@@ -538,6 +569,19 @@ class CloudSTTTests(unittest.TestCase):
         self.assertIn("request_id=req-safe-id", output)
         self.assertNotIn("secret-api-key", output)
         self.assertNotIn("raw audio bytes", output)
+        values = {
+            "cloud_stt_provider": "openai",
+            "stt_model_openai": "gpt-4o-transcribe",
+            "api_key_openai": "secret-api-key",
+        }
+        client = Mock()
+        client.audio.transcriptions.create.side_effect = error
+        engine = CloudSTTEngine()
+        with patch("src.engine.stt_cloud.config_manager.get", side_effect=lambda key, default=None: values.get(key, default)), \
+             patch("openai.OpenAI", return_value=client):
+            engine.transcribe(np.zeros(1600, dtype=np.float32))
+        self.assertIn("HTTP 429", engine.last_error)
+        self.assertNotIn("secret-api-key", engine.last_error)
 
     def test_missing_cloud_key_produces_safe_user_error(self):
         values = {"cloud_stt_provider": "groq", "stt_model_groq": "whisper-large-v3-turbo"}
@@ -578,6 +622,40 @@ class ProviderCatalogTests(unittest.TestCase):
 
         self.assertEqual(result.stt_models, ("gpt-4o-mini-transcribe",))
         self.assertEqual(result.text_models, ("gpt-4o-mini",))
+
+    def test_openai_catalog_excludes_realtime_only_name_matches(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"data": [
+            {"id": "gpt-live-transcribe"},
+            {"id": "gpt-transcribe"},
+            {"id": "gpt-4o-mini-transcribe"},
+        ]}
+        session = Mock()
+        session.get.return_value = response
+
+        result = ProviderCatalog(session=session).discover("openai", "secret")
+
+        self.assertEqual(result.stt_models, ("gpt-transcribe", "gpt-4o-mini-transcribe"))
+        self.assertIn("gpt-live-transcribe", result.text_models)
+
+
+class AudioSessionSilencerTests(unittest.TestCase):
+    def test_other_sessions_are_restored_to_their_previous_mute_state(self):
+        audible = Mock()
+        audible.GetMute.return_value = 0
+        already_muted = Mock()
+        already_muted.GetMute.return_value = 1
+        sessions = [
+            Mock(ProcessId=101, InstanceIdentifier="audible", SimpleAudioVolume=audible),
+            Mock(ProcessId=102, InstanceIdentifier="muted", SimpleAudioVolume=already_muted),
+        ]
+        silencer = AudioSessionSilencer(session_provider=lambda: sessions)
+
+        self.assertTrue(silencer.mute())
+        silencer.restore()
+
+        audible.SetMute.assert_has_calls([call(1, None), call(0, None)])
+        already_muted.SetMute.assert_called_once_with(1, None)
 
     def test_provider_error_does_not_include_response_body_or_key(self):
         response = Mock(status_code=401, text="secret diagnostic body")

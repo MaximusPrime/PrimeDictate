@@ -12,6 +12,7 @@ from PySide6.QtGui import QIcon, QGuiApplication
 from src.config import APP_DIR, config_manager, get_resource_path
 from src.i18n import set_language, translate
 from src.audio.recorder import AudioRecorder
+from src.audio.session_silencer import AudioSessionSilencer
 from src.audio.vad import trim_silence, is_audio_meaningful
 from src.engine.engine_manager import engine_manager
 from src.hotkey.listener import HotkeyListener
@@ -75,6 +76,7 @@ class PrimeDictateApp(QObject):
 
         self.signals = AppSignals(self)
         self.recorder = AudioRecorder()
+        self.audio_silencer = AudioSessionSilencer()
         self.engine_manager = engine_manager
         self.operation_coordinator = OperationCoordinator()
         self.state = AppState.IDLE
@@ -264,6 +266,11 @@ class PrimeDictateApp(QObject):
         if config_manager.get("play_sound", True):
             threading.Thread(target=lambda: winsound.Beep(1000, 150), daemon=True).start()
 
+        if config_manager.get("mute_other_audio", False):
+            # Silence playback before opening the microphone so the beginning
+            # of the recording cannot capture a browser/video tail.
+            self.audio_silencer.mute()
+
         try:
             self.recorder.start_recording(
                 level_callback=lambda lvl: self.signals.audio_level.emit(lvl),
@@ -271,6 +278,7 @@ class PrimeDictateApp(QObject):
                 limit_callback=lambda: self.signals.recording_limit_reached.emit(),
             )
         except Exception as exc:
+            self.audio_silencer.restore()
             self.operation_coordinator.finish("dictation")
             logger.error("Could not start recording: %s", exc)
             self._set_state(AppState.ERROR, translate("microphone.error.start"))
@@ -288,6 +296,10 @@ class PrimeDictateApp(QObject):
     def _on_recording_stopped(self):
         if self.state != AppState.RECORDING or not self.recorder.is_recording:
             return
+
+        # Recording has logically ended. Restore output sessions on the same
+        # Qt thread that muted them before finalization moves to a worker.
+        self.audio_silencer.restore()
 
         if config_manager.get("play_sound", True):
             threading.Thread(target=lambda: winsound.Beep(800, 150), daemon=True).start()
@@ -463,6 +475,9 @@ class PrimeDictateApp(QObject):
         self.hotkey_listener.stop_listening()
         if self.recorder.is_recording:
             self.recorder.stop_recording()
+        silencer = getattr(self, "audio_silencer", None)
+        if silencer is not None:
+            silencer.restore()
         if not self.main_window.prepare_shutdown():
             logger.error("File transcription worker did not stop during application exit.")
         processing_thread = self._processing_thread

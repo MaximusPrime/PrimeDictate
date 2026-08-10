@@ -10,5 +10,6 @@ requests>=2.31.0,<3
 openai>=1.12.0,<3
 faster-whisper>=1.0.0,<2
 pywin32>=306,<400
+pycaw>=20251023,<20260000
 pillow>=10.2.0,<13
 pyinstaller>=6.0.0,<7

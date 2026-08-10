@@ -740,6 +740,13 @@ class MainWindowPagesMixin:
         self.mic_progress.setRange(0, 100)
         a_layout.addWidget(self.mic_progress)
 
+        input_note = QLabel(translate("settings.audio_input.note"))
+        input_note.setObjectName("infoNote")
+        input_note.setWordWrap(True)
+        input_note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self._bind_translation(input_note, "text", "settings.audio_input.note", input_note.setText)
+        a_layout.addWidget(input_note)
+
         duration_row = QHBoxLayout()
         duration_label = QLabel("Maksimum dikte süresi:")
         duration_label.setObjectName("fieldLabel")
@@ -768,6 +775,10 @@ class MainWindowPagesMixin:
         )
         self.history_enabled_cb = QCheckBox("Dikte geçmişini bu cihazda sakla")
         self.play_sound_cb = QCheckBox("Kayıt başlangıç ve bitiş seslerini çal")
+        self.mute_other_audio_cb = QCheckBox(translate("settings.mute_other_audio"))
+        self.mute_other_audio_cb.setToolTip(translate("settings.mute_other_audio.tooltip"))
+        self._bind_translation(self.mute_other_audio_cb, "text", "settings.mute_other_audio", self.mute_other_audio_cb.setText)
+        self._bind_translation(self.mute_other_audio_cb, "tooltip", "settings.mute_other_audio.tooltip", self.mute_other_audio_cb.setToolTip)
         self.overlay_cb = QCheckBox("Yüzen ses dalgası göstergesini kullan")
         self.overlay_always_on_cb = QCheckBox("Yüzen dikte kutusunu her zaman göster (Sürekli görünür)")
         self.start_windows_cb = QCheckBox("Windows ile otomatik başlat")
@@ -791,6 +802,7 @@ class MainWindowPagesMixin:
             self.restore_clip_cb,
             self.history_enabled_cb,
             self.play_sound_cb,
+            self.mute_other_audio_cb,
             self.overlay_cb,
             self.overlay_always_on_cb,
             self.start_windows_cb,
@@ -802,6 +814,7 @@ class MainWindowPagesMixin:
         b_layout.addWidget(self.restore_clip_cb)
         b_layout.addWidget(self.history_enabled_cb)
         b_layout.addWidget(self.play_sound_cb)
+        b_layout.addWidget(self.mute_other_audio_cb)
         b_layout.addWidget(self.overlay_cb)
         b_layout.addWidget(self.overlay_always_on_cb)
         b_layout.addWidget(self.start_windows_cb)

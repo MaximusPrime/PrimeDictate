@@ -35,7 +35,7 @@ from src.ui.page_registry import PAGE_DEFINITIONS
 from src.ui.main_window_pages import MainWindowPagesMixin
 from src.ui.main_window_settings import MainWindowSettingsMixin
 from src.ui.main_window_models import MainWindowModelsMixin
-from src.ui.main_window_widgets import QComboBox, HotkeyRecorderWidget
+from src.ui.main_window_widgets import QComboBox, HotkeyRecorderWidget, StatusPillLabel
 from src.ui.provider_test_controller import ProviderTestController
 from src.ui.file_transcription_controller import FileTranscriptionController
 from src.logging_config import SensitiveDataFilter
@@ -249,11 +249,10 @@ class MainWindow(MainWindowPagesMixin, MainWindowSettingsMixin, MainWindowModels
         actions_layout.setContentsMargins(5, 5, 5, 5)
         actions_layout.setSpacing(6)
 
-        self.status_label = QLabel("●  Hazır")
+        self.status_label = StatusPillLabel("●  Hazır")
         self.status_label.setObjectName("statusPill")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setFixedHeight(40)
-        self.status_label.setMinimumWidth(112)
         actions_layout.addWidget(self.status_label)
 
         self.dictate_btn = QPushButton("Dikte Et")

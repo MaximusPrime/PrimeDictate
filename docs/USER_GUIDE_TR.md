@@ -222,6 +222,10 @@ Uygulama arayüzü Türkçe ve İngilizce kullanılabilir. Bu ayar konuşma dili
 
 Canlı seviye göstergesi kayıt sırasında giriş seviyesini görmeye yardımcı olur. Ses algılanmıyorsa önce Windows gizlilik izinleri ve giriş aygıtı kontrol edilmelidir.
 
+PrimeDictate canlı diktede yalnızca seçili Windows **giriş** aygıtını kaydeder. Tarayıcı videosu veya başka bir uygulamanın çıkış sesini yazıya çevirmek için Windows'ta giriş aygıtı olarak sunulan **Stereo Mix** ya da bir sanal ses kablosu seçilmelidir. Bu kullanımda **Dikte sırasında diğer uygulamaların sesini sessize al** kapalı olmalıdır.
+
+**Dikte sırasında diğer uygulamaların sesini sessize al** açılırsa PrimeDictate kayıt başlarken mevcut Windows çıkış ses oturumlarını sessize alır. Kayıt durdurulduğunda her oturumun önceki sessiz/açık durumu geri yüklenir. Bu seçenek mikrofon kaynağını değiştirmez ve varsayılan olarak kapalıdır.
+
 ### Kısayol Modları
 
 | Mod | Davranış |

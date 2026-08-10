@@ -56,6 +56,32 @@ def _openai_language_request(model: str, language: str) -> dict:
     logger.warning("OpenAI language hint omitted for an unrecognized transcription model.")
     return {}
 
+
+def _openai_model_request(model: str) -> dict:
+    # Diarization requires server-side chunking for recordings over 30 seconds
+    # and accepts the same option for shorter recordings.
+    if model == "gpt-4o-transcribe-diarize" or model.startswith("gpt-4o-transcribe-diarize-"):
+        return {"chunking_strategy": "auto"}
+    return {}
+
+
+def _failure_detail(failure, fallback: str) -> str:
+    if failure is None:
+        return fallback
+    labels = {
+        "authentication": translate("provider.failure.authentication"),
+        "rate_limited": translate("provider.failure.rate_limited"),
+        "timeout": translate("provider.failure.timeout"),
+        "network_error": translate("provider.failure.network_error"),
+        "server_error": translate("provider.failure.server_error"),
+        "request_rejected": translate("provider.failure.request_rejected"),
+        "provider_error": translate("provider.failure.request_rejected"),
+    }
+    detail = labels.get(failure.code, fallback)
+    if failure.status_code is not None:
+        detail = f"{detail}; HTTP {failure.status_code}"
+    return detail
+
 class CloudSTTEngine(BaseSTTEngine):
     def __init__(self):
         self.last_error = None
@@ -167,6 +193,7 @@ class CloudSTTEngine(BaseSTTEngine):
                 buffer.seek(0)
                 selected_model = model or "gpt-4o-mini-transcribe"
                 request = {"model": selected_model, "file": buffer}
+                request.update(_openai_model_request(selected_model))
                 request.update(_openai_language_request(selected_model, language))
                 transcript = run_cancellable(
                     lambda: client.audio.transcriptions.create(**request),
@@ -185,7 +212,10 @@ class CloudSTTEngine(BaseSTTEngine):
                 self.last_failure = failure_from_exception("openai", e)
                 _log_api_exception("OpenAI", e)
                 status = getattr(e, "status_code", None)
-                suffix = f"HTTP {status}" if status is not None else type(e).__name__
+                suffix = _failure_detail(
+                    self.last_failure,
+                    f"HTTP {status}" if status is not None else type(e).__name__,
+                )
                 self.last_error = translate("cloud.error.stt_request", provider="OpenAI", detail=suffix)
 
         if provider == "gemini":

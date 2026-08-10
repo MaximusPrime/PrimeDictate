@@ -29,6 +29,7 @@ PrimeDictate records from a global hotkey, transcribes with the selected local o
 - Persistent loopback-only Vulkan inference with background model warmup for fast consecutive dictation.
 - Separate managed models for faster-whisper (CPU/CUDA) and whisper.cpp GGML (Vulkan).
 - Optional Groq, OpenAI, and Gemini Audio cloud transcription.
+- Optional per-session Windows output muting during live dictation, with prior mute states restored when recording stops.
 - Optional rule-based cleanup, local Ollama/LM Studio, or cloud LLM processing.
 - Turkish and English interfaces backed by complete, matching locale catalogs.
 - Adaptive voice activity detection, bounded recordings, and background finalization.

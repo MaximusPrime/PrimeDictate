@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QComboBox as QtQComboBox, QPushButton
+from PySide6.QtWidgets import QComboBox as QtQComboBox, QLabel, QPushButton, QSizePolicy
 
 from src.hotkey.listener import canonicalize_hotkey
 from src.i18n import translate
@@ -10,6 +10,36 @@ from src.i18n import translate
 class QComboBox(QtQComboBox):
     def wheelEvent(self, event):
         event.ignore()
+
+
+class StatusPillLabel(QLabel):
+    """Compact status pill that keeps the beginning and full tooltip visible."""
+
+    MIN_WIDTH = 150
+    # The 170 px cap leaves room for the 150 px Dictate button at the
+    # application's supported 960 px minimum width.
+    MAX_WIDTH = 170
+    TEXT_PADDING = 34
+
+    def __init__(self, text="", parent=None):
+        self._full_text = ""
+        super().__init__("", parent)
+        self.setMinimumWidth(self.MIN_WIDTH)
+        self.setMaximumWidth(self.MAX_WIDTH)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setText(text)
+
+    def setText(self, text):
+        self._full_text = "" if text is None else str(text)
+        self.setToolTip(self._full_text)
+        natural_width = self.fontMetrics().horizontalAdvance(self._full_text) + self.TEXT_PADDING
+        self.setFixedWidth(max(self.MIN_WIDTH, min(self.MAX_WIDTH, natural_width)))
+        available = max(1, self.width() - self.TEXT_PADDING)
+        rendered = self.fontMetrics().elidedText(self._full_text, Qt.ElideRight, available)
+        super().setText(rendered)
+
+    def fullText(self):
+        return self._full_text
 
 class HotkeyRecorderWidget(QPushButton):
     hotkey_changed = Signal(str)

@@ -63,6 +63,8 @@ class ProviderCatalog:
         if not models:
             return ProviderCatalogResult(False, "no_models")
         stt_models = tuple(model for model in models if self._is_stt_model(provider, model))
+        if provider == "openai":
+            stt_models = tuple(sorted(stt_models, key=self._openai_stt_sort_key))
         text_models = tuple(model for model in models if model not in stt_models)
         if provider == "gemini":
             stt_models = text_models = tuple(models)
@@ -75,7 +77,9 @@ class ProviderCatalog:
         ids = [item.get(key, "") for item in items]
         if provider == "gemini":
             ids = [model.removeprefix("models/") for model in ids if isinstance(model, str)]
-        return tuple(sorted({model for model in ids if isinstance(model, str) and model})[:200])
+        # Do not truncate before capability filtering. Large provider catalogs
+        # can otherwise hide transcription models that sort near the end.
+        return tuple(sorted({model for model in ids if isinstance(model, str) and model}))
 
     @staticmethod
     def _is_stt_model(provider: str, model: str) -> bool:
@@ -83,8 +87,27 @@ class ProviderCatalog:
         if provider == "groq":
             return "whisper" in model
         if provider == "openai":
-            return "transcribe" in model or model == "whisper-1"
+            return (
+                model == "whisper-1"
+                or model.startswith("whisper-1-")
+                or model == "gpt-transcribe"
+                or model.startswith("gpt-transcribe-")
+                or model == "gpt-4o-transcribe"
+                or model.startswith("gpt-4o-transcribe-")
+                or model == "gpt-4o-mini-transcribe"
+                or model.startswith("gpt-4o-mini-transcribe-")
+            )
         return False
+
+    @staticmethod
+    def _openai_stt_sort_key(model: str):
+        recommended = {
+            "gpt-transcribe": 0,
+            "gpt-4o-transcribe": 1,
+            "gpt-4o-mini-transcribe": 2,
+            "whisper-1": 3,
+        }
+        return recommended.get(model, 10), model
 
 
 provider_catalog = ProviderCatalog()
